@@ -5,6 +5,7 @@ import { protectRoute, requireAdmin } from '@/middleware/protect';
 import { db } from '@/lib/db';
 import { book as bookTable, loan } from '@/lib/db/schema';
 import { and, eq, ne, sql } from 'drizzle-orm';
+import { buildRequestLogger, getOrCreateRequestId, toErrorDetails } from '@/lib/logger';
 
 const BookSchema = z.object({
     id: z.string(),
@@ -23,28 +24,64 @@ const UpdateBookBodySchema = z.object({
 });
 
 const books = new Elysia({ prefix: "/books" })
-    .get("/", async ({ query }) => {
+    .get("/", async ({ query, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
         const page = query.page;
         const perPage = Math.min(query.perPage, 100);
 
-        const { books, totalItems } = await getPaginatedBooks({ page, perPage });
-        const totalPages = totalItems === 0 ? 0 : Math.ceil(totalItems / perPage);
-        const hasNextPage = page < totalPages;
-        const hasPreviousPage = page > 1 && totalPages > 0;
-
-        return {
-            books,
-            metadata: {
-                hasNextPage,
-                hasPreviousPage,
-                nextPage: hasNextPage ? page + 1 : null,
-                previousPage: hasPreviousPage ? Math.min(page - 1, totalPages) : null,
-                totalItems,
-                totalPages,
-                currentPage: page,
+        requestLogger.debug(
+            {
+                page,
                 perPage,
-            }
-        };
+            },
+            'books.list.start',
+        );
+
+        try {
+            const { books, totalItems } = await getPaginatedBooks({ page, perPage });
+            const totalPages = totalItems === 0 ? 0 : Math.ceil(totalItems / perPage);
+            const hasNextPage = page < totalPages;
+            const hasPreviousPage = page > 1 && totalPages > 0;
+
+            requestLogger.info(
+                {
+                    page,
+                    perPage,
+                    totalItems,
+                    totalPages,
+                    returnedCount: books.length,
+                    durationMs: Date.now() - startedAt,
+                },
+                'books.list.success',
+            );
+
+            return {
+                books,
+                metadata: {
+                    hasNextPage,
+                    hasPreviousPage,
+                    nextPage: hasNextPage ? page + 1 : null,
+                    previousPage: hasPreviousPage ? Math.min(page - 1, totalPages) : null,
+                    totalItems,
+                    totalPages,
+                    currentPage: page,
+                    perPage,
+                }
+            };
+        } catch (error) {
+            requestLogger.error(
+                {
+                    page,
+                    perPage,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'books.list.error',
+            );
+            throw error;
+        }
     }, {
         response: z.object({
             books: z.array(BookSchema),
@@ -64,29 +101,68 @@ const books = new Elysia({ prefix: "/books" })
             perPage: z.coerce.number().int().min(1).default(20),
         })
     })
-    .get("/search", async ({ query }) => {
+    .get("/search", async ({ query, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
         const page = query.page;
         const perPage = Math.min(query.perPage, 100);
         const q = query.q;
 
-        const { books, totalItems } = await getPaginatedBooks({ page, perPage, q });
-        const totalPages = totalItems === 0 ? 0 : Math.ceil(totalItems / perPage);
-        const hasNextPage = page < totalPages;
-        const hasPreviousPage = page > 1 && totalPages > 0;
-
-        return {
-            books,
-            metadata: {
-                hasNextPage,
-                hasPreviousPage,
-                nextPage: hasNextPage ? page + 1 : null,
-                previousPage: hasPreviousPage ? Math.min(page - 1, totalPages) : null,
-                totalItems,
-                totalPages,
-                currentPage: page,
+        requestLogger.debug(
+            {
+                page,
                 perPage,
-            }
-        };
+                queryLength: q.length,
+            },
+            'books.search.start',
+        );
+
+        try {
+            const { books, totalItems } = await getPaginatedBooks({ page, perPage, q });
+            const totalPages = totalItems === 0 ? 0 : Math.ceil(totalItems / perPage);
+            const hasNextPage = page < totalPages;
+            const hasPreviousPage = page > 1 && totalPages > 0;
+
+            requestLogger.info(
+                {
+                    page,
+                    perPage,
+                    queryLength: q.length,
+                    totalItems,
+                    totalPages,
+                    returnedCount: books.length,
+                    durationMs: Date.now() - startedAt,
+                },
+                'books.search.success',
+            );
+
+            return {
+                books,
+                metadata: {
+                    hasNextPage,
+                    hasPreviousPage,
+                    nextPage: hasNextPage ? page + 1 : null,
+                    previousPage: hasPreviousPage ? Math.min(page - 1, totalPages) : null,
+                    totalItems,
+                    totalPages,
+                    currentPage: page,
+                    perPage,
+                }
+            };
+        } catch (error) {
+            requestLogger.error(
+                {
+                    page,
+                    perPage,
+                    queryLength: q.length,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'books.search.error',
+            );
+            throw error;
+        }
     }, {
         response: z.object({
             books: z.array(BookSchema),
@@ -109,8 +185,21 @@ const books = new Elysia({ prefix: "/books" })
     })
     .use(protectRoute)
     .use(requireAdmin)
-    .post("/", async ({ body, set }) => {
+    .post("/", async ({ body, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
         const { title, genre, publication_year } = body;
+
+        requestLogger.debug(
+            {
+                genre,
+                publication_year,
+                titleLength: title.length,
+            },
+            'books.create.start',
+        );
+
         try {
             const normalizedTitle = title.trim();
 
@@ -127,6 +216,14 @@ const books = new Elysia({ prefix: "/books" })
 
             if (duplicateBook.length > 0) {
                 set.status = 409;
+                requestLogger.warn(
+                    {
+                        title: normalizedTitle,
+                        publication_year,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'books.create.conflict.duplicate',
+                );
                 return {
                     ok: false,
                     message: `A book with title "${normalizedTitle}" and publication year ${publication_year} already exists.`,
@@ -149,14 +246,31 @@ const books = new Elysia({ prefix: "/books" })
                 });
 
             set.status = 201;
+            requestLogger.info(
+                {
+                    createdBookId: created[0].id,
+                    genre,
+                    publication_year,
+                    durationMs: Date.now() - startedAt,
+                },
+                'books.create.success',
+            );
             return {
                 ok: true,
                 message: `Book "${created[0].title}" has been added successfully.`,
                 book: created[0],
             };
-        } catch (err) {
+        } catch (error) {
             set.status = 500;
-            console.error('Error adding book:', err);
+            requestLogger.error(
+                {
+                    genre,
+                    publication_year,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'books.create.error',
+            );
             return { message: 'Failed to add book due to an unexpected error.', ok: false };
         }
     }, {
@@ -177,9 +291,23 @@ const books = new Elysia({ prefix: "/books" })
             }),
         ])
     })
-    .put("/:id", async ({ params, body, set }) => {
+    .put("/:id", async ({ params, body, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
         const book_id = params.id;
         const { title, genre, publication_year } = body;
+
+        requestLogger.debug(
+            {
+                book_id,
+                hasTitleUpdate: title !== undefined,
+                hasGenreUpdate: genre !== undefined,
+                hasPublicationYearUpdate: publication_year !== undefined,
+            },
+            'books.update.start',
+        );
+
         try {
             const existingBook = await db
                 .select({
@@ -195,6 +323,13 @@ const books = new Elysia({ prefix: "/books" })
 
             if (existingBook.length === 0) {
                 set.status = 404;
+                requestLogger.warn(
+                    {
+                        book_id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'books.update.not_found',
+                );
                 return {
                     ok: false,
                     message: `Book with ID ${book_id} was not found.`,
@@ -226,6 +361,15 @@ const books = new Elysia({ prefix: "/books" })
 
                 if (duplicateBook.length > 0) {
                     set.status = 409;
+                    requestLogger.warn(
+                        {
+                            book_id,
+                            effectiveTitle,
+                            effectivePublicationYear,
+                            durationMs: Date.now() - startedAt,
+                        },
+                        'books.update.conflict.duplicate',
+                    );
                     return {
                         ok: false,
                         message: `A book with title "${effectiveTitle}" and publication year ${effectivePublicationYear} already exists.`,
@@ -250,14 +394,29 @@ const books = new Elysia({ prefix: "/books" })
                     created_at: bookTable.created_at,
                 });
 
+            requestLogger.info(
+                {
+                    book_id,
+                    updatedBookId: updated[0].id,
+                    durationMs: Date.now() - startedAt,
+                },
+                'books.update.success',
+            );
             return {
                 ok: true,
                 message: `Book "${updated[0].title}" has been updated successfully.`,
                 book: updated[0],
             };
-        } catch (err) {
+        } catch (error) {
             set.status = 500;
-            console.error('Error updating book:', err);
+            requestLogger.error(
+                {
+                    book_id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'books.update.error',
+            );
             return { message: 'Failed to update book due to an unexpected error.', ok: false };
         }
     }, {
@@ -277,8 +436,19 @@ const books = new Elysia({ prefix: "/books" })
             }),
         ]),
     })
-    .delete("/:id", async ({ params, set }) => {
+    .delete("/:id", async ({ params, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
         const book_id = params.id;
+
+        requestLogger.debug(
+            {
+                book_id,
+            },
+            'books.delete.start',
+        );
+
         try {
             const existingBook = await db
                 .select({ id: bookTable.id })
@@ -288,6 +458,13 @@ const books = new Elysia({ prefix: "/books" })
 
             if (existingBook.length === 0) {
                 set.status = 404;
+                requestLogger.warn(
+                    {
+                        book_id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'books.delete.not_found',
+                );
                 return { message: `Book with ID ${book_id} was not found.`, ok: false };
             }
 
@@ -299,6 +476,13 @@ const books = new Elysia({ prefix: "/books" })
 
             if (activeLoan.length > 0) {
                 set.status = 409;
+                requestLogger.warn(
+                    {
+                        book_id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'books.delete.conflict.active_loan',
+                );
                 return {
                     message: `Book with ID ${book_id} cannot be deleted while it has an active loan.`,
                     ok: false,
@@ -307,13 +491,27 @@ const books = new Elysia({ prefix: "/books" })
 
             await db.delete(bookTable).where(eq(bookTable.id, book_id));
 
+            requestLogger.info(
+                {
+                    book_id,
+                    durationMs: Date.now() - startedAt,
+                },
+                'books.delete.success',
+            );
             return {
                 ok: true,
                 message: `Book with ID ${book_id} has been deleted successfully.`,
             };
-        } catch (err) {
+        } catch (error) {
             set.status = 500;
-            console.error('Error deleting book:', err);
+            requestLogger.error(
+                {
+                    book_id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'books.delete.error',
+            );
             return { message: 'Failed to delete book due to an unexpected error.', ok: false };
         }
     }, {

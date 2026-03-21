@@ -22,6 +22,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { getAuthErrorMessage } from "@/lib/api";
 
 export function LoginForm({
   className,
@@ -45,8 +46,13 @@ export function LoginForm({
       })
 
       if (response.error) {
-        toast.error(response.error.message || "Login failed. Please try again.");
-        console.error("Login error:", response.error);
+        const message = getAuthErrorMessage(response.error, "Login failed. Please try again.");
+        toast.error(message);
+        console.error("Login error:", {
+          status: response.error.status,
+          statusText: response.error.statusText,
+          message,
+        });
         return;
       }
 
@@ -54,8 +60,9 @@ export function LoginForm({
         router.push("/dashboard");
       }
     } catch (error) {
-      toast.error("Login failed. Please try again.");
-      console.error("Login error:", error);
+      const message = getAuthErrorMessage(error, "Login failed. Please try again.");
+      toast.error(message);
+      console.error("Login error:", { message });
     } finally {
       setIsLoading(false);
     }

@@ -6,11 +6,24 @@ import { protectRoute, requireAdmin } from '@/middleware/protect';
 import { db } from '@/lib/db';
 import { book as bookTable, loan } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
+import { buildRequestLogger, getOrCreateRequestId, toErrorDetails } from '@/lib/logger';
 
 const loans = new Elysia({ prefix: '/loans' })
     .use(protectRoute)
-    .post("/:id/borrow", async ({ params, session, set }) => {
+    .post("/:id/borrow", async ({ params, session, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
         const book_id = params.id;
+
+        requestLogger.debug(
+            {
+                book_id,
+                userId: session.user.id,
+            },
+            'loans.borrow.start',
+        );
+
         try {
             const existingBook = await db
                 .select({ id: bookTable.id })
@@ -20,6 +33,14 @@ const loans = new Elysia({ prefix: '/loans' })
 
             if (existingBook.length === 0) {
                 set.status = 404;
+                requestLogger.warn(
+                    {
+                        book_id,
+                        userId: session.user.id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'loans.borrow.book_not_found',
+                );
                 return { message: `Book with ID ${book_id} was not found.`, ok: false };
             }
 
@@ -31,6 +52,14 @@ const loans = new Elysia({ prefix: '/loans' })
 
             if (activeLoanForBook.length > 0) {
                 set.status = 409;
+                requestLogger.warn(
+                    {
+                        book_id,
+                        userId: session.user.id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'loans.borrow.conflict.already_borrowed',
+                );
                 return { message: `Book with ID ${book_id} is already borrowed.`, ok: false };
             }
 
@@ -45,10 +74,28 @@ const loans = new Elysia({ prefix: '/loans' })
                 due_date: dueAt,
             });
 
+            requestLogger.info(
+                {
+                    book_id,
+                    userId: session.user.id,
+                    checkoutAt: checkoutAt.toISOString(),
+                    dueAt: dueAt.toISOString(),
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.borrow.success',
+            );
             return { message: `Book with ID ${book_id} has been borrowed successfully.`, ok: true };
-        } catch (err) {
+        } catch (error) {
             set.status = 500;
-            console.error('Error borrowing book:', err);
+            requestLogger.error(
+                {
+                    book_id,
+                    userId: session.user.id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'loans.borrow.error',
+            );
             return { message: 'Failed to borrow book due to an unexpected error.', ok: false };
         }
     }, {
@@ -60,8 +107,20 @@ const loans = new Elysia({ prefix: '/loans' })
             message: z.string(),
         })
     })
-    .post("/:id/return", async ({ params, session, set }) => {
+    .post("/:id/return", async ({ params, session, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
         const book_id = params.id;
+
+        requestLogger.debug(
+            {
+                book_id,
+                userId: session.user.id,
+            },
+            'loans.return.start',
+        );
+
         try {
             const activeLoan = await db
                 .select({ id: loan.id })
@@ -71,6 +130,14 @@ const loans = new Elysia({ prefix: '/loans' })
 
             if (activeLoan.length === 0) {
                 set.status = 404;
+                requestLogger.warn(
+                    {
+                        book_id,
+                        userId: session.user.id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'loans.return.not_found.active_loan',
+                );
                 return { message: `No active loan found for book with ID ${book_id} for the current user.`, ok: false };
             }
 
@@ -78,10 +145,27 @@ const loans = new Elysia({ prefix: '/loans' })
                 .set({ status: "returned", returned_at: new Date() })
                 .where(eq(loan.id, activeLoan[0].id));
 
+            requestLogger.info(
+                {
+                    book_id,
+                    userId: session.user.id,
+                    loanId: activeLoan[0].id,
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.return.success',
+            );
             return { message: `Book with ID ${book_id} has been returned successfully.`, ok: true };
-        } catch (err) {
+        } catch (error) {
             set.status = 500;
-            console.error('Error returning book:', err);
+            requestLogger.error(
+                {
+                    book_id,
+                    userId: session.user.id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'loans.return.error',
+            );
             return { message: 'Failed to return book due to an unexpected error.', ok: false };
         }
     }, {
@@ -94,8 +178,18 @@ const loans = new Elysia({ prefix: '/loans' })
         })
     })
     .use(requireAdmin)
-    .put("/:id/force-return", async ({ params, set }) => {
+    .put("/:id/force-return", async ({ params, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
         const loan_id = params.id;
+
+        requestLogger.debug(
+            {
+                loan_id,
+            },
+            'loans.forceReturn.start',
+        );
 
         try {
             const existingLoan = await db
@@ -110,6 +204,13 @@ const loans = new Elysia({ prefix: '/loans' })
 
             if (existingLoan.length === 0) {
                 set.status = 404;
+                requestLogger.warn(
+                    {
+                        loan_id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'loans.forceReturn.not_found',
+                );
                 return {
                     ok: false,
                     message: `Loan with ID ${loan_id} was not found.`,
@@ -119,6 +220,13 @@ const loans = new Elysia({ prefix: '/loans' })
             const currentLoan = existingLoan[0];
 
             if (currentLoan.status === "returned") {
+                requestLogger.info(
+                    {
+                        loan_id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'loans.forceReturn.noop.already_returned',
+                );
                 return {
                     ok: true,
                     message: `Loan with ID ${loan_id} is already returned.`,
@@ -141,6 +249,15 @@ const loans = new Elysia({ prefix: '/loans' })
                     returned_at: loan.returned_at,
                 });
 
+            requestLogger.info(
+                {
+                    loan_id,
+                    previousStatus: currentLoan.status,
+                    newStatus: forcedReturn[0].status,
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.forceReturn.success',
+            );
             return {
                 ok: true,
                 message: `Loan with ID ${loan_id} has been force-returned successfully.`,
@@ -151,9 +268,16 @@ const loans = new Elysia({ prefix: '/loans' })
                     returned_at: forcedReturn[0].returned_at,
                 },
             };
-        } catch (err) {
+        } catch (error) {
             set.status = 500;
-            console.error('Error force returning loan:', err);
+            requestLogger.error(
+                {
+                    loan_id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'loans.forceReturn.error',
+            );
             return { message: 'Failed to force return loan due to an unexpected error.', ok: false };
         }
     }, {
@@ -177,8 +301,18 @@ const loans = new Elysia({ prefix: '/loans' })
             }),
         ])
     })
-    .delete("/:id", async ({ params, set }) => {
+    .delete("/:id", async ({ params, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
         const loan_id = params.id;
+
+        requestLogger.debug(
+            {
+                loan_id,
+            },
+            'loans.delete.start',
+        );
 
         try {
             const existingLoan = await db
@@ -192,6 +326,13 @@ const loans = new Elysia({ prefix: '/loans' })
 
             if (existingLoan.length === 0) {
                 set.status = 404;
+                requestLogger.warn(
+                    {
+                        loan_id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'loans.delete.not_found',
+                );
                 return {
                     ok: false,
                     message: `Loan with ID ${loan_id} was not found.`,
@@ -204,6 +345,14 @@ const loans = new Elysia({ prefix: '/loans' })
                 .delete(loan)
                 .where(eq(loan.id, loan_id));
 
+            requestLogger.info(
+                {
+                    loan_id,
+                    previousStatus: currentLoan.status,
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.delete.success',
+            );
             return {
                 ok: true,
                 message: `Loan with ID ${loan_id} has been deleted successfully.`,
@@ -212,9 +361,16 @@ const loans = new Elysia({ prefix: '/loans' })
                     previous_status: currentLoan.status,
                 },
             };
-        } catch (err) {
+        } catch (error) {
             set.status = 500;
-            console.error('Error deleting loan:', err);
+            requestLogger.error(
+                {
+                    loan_id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'loans.delete.error',
+            );
             return { message: 'Failed to delete loan due to an unexpected error.', ok: false };
         }
     }, {

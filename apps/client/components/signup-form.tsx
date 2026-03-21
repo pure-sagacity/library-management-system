@@ -18,6 +18,7 @@ import Link from "next/link"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { authClient } from "@/lib/auth-client"
+import { getAuthErrorMessage } from "@/lib/api"
 import { toast } from "sonner"
 import { Spinner } from "./ui/spinner"
 import { CheckCircle } from "lucide-react"
@@ -48,15 +49,21 @@ export function SignupForm({
       })
 
       if (response.error) {
-        toast.error(response.error.message || "Signup failed. Please try again.");
-        console.error("Signup error:", response.error);
+        const message = getAuthErrorMessage(response.error, "Signup failed. Please try again.");
+        toast.error(message);
+        console.error("Signup error:", {
+          status: response.error.status,
+          statusText: response.error.statusText,
+          message,
+        });
         return;
       }
 
       router.push("/dashboard");
     } catch (error) {
-      toast.error("Signup failed. Please try again.");
-      console.error("Signup error:", error);
+      const message = getAuthErrorMessage(error, "Signup failed. Please try again.");
+      toast.error(message);
+      console.error("Signup error:", { message });
     } finally {
       setIsLoading(false);
     }

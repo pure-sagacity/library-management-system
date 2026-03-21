@@ -3,8 +3,9 @@
   "version": "1.0.50",
   "main": "src/index.ts",
   "scripts": {
+    "start": "bun run . | bunx pino-pretty",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "bun run --watch src/index.ts",
+    "dev": "bun run --watch src/index.ts | bunx pino-pretty -c ",
     "db:auth": "bunx auth generate --output ./lib/db/schema/auth-schema.ts",
     "db:push": "bunx drizzle-kit push",
     "db:generate": "bunx drizzle-kit generate",
@@ -18,6 +19,7 @@
     "dotenv": "^17.3.1",
     "drizzle-orm": "^0.45.1",
     "elysia": "latest",
+    "pino": "^10.3.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
