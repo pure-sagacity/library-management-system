@@ -176,6 +176,65 @@ const loans = new Elysia()
                 message: z.string(),
             }),
         ])
+    })
+    .delete("/:id", async ({ params, set }) => {
+        const loan_id = params.id;
+
+        try {
+            const existingLoan = await db
+                .select({
+                    id: loan.id,
+                    status: loan.status,
+                })
+                .from(loan)
+                .where(eq(loan.id, loan_id))
+                .limit(1);
+
+            if (existingLoan.length === 0) {
+                set.status = 404;
+                return {
+                    ok: false,
+                    message: `Loan with ID ${loan_id} was not found.`,
+                };
+            }
+
+            const currentLoan = existingLoan[0];
+
+            await db
+                .delete(loan)
+                .where(eq(loan.id, loan_id));
+
+            return {
+                ok: true,
+                message: `Loan with ID ${loan_id} has been deleted successfully.`,
+                loan: {
+                    id: currentLoan.id,
+                    previous_status: currentLoan.status,
+                },
+            };
+        } catch (err) {
+            set.status = 500;
+            console.error('Error deleting loan:', err);
+            return { message: 'Failed to delete loan due to an unexpected error.', ok: false };
+        }
+    }, {
+        params: z.object({
+            id: z.string(),
+        }),
+        response: z.union([
+            z.object({
+                ok: z.literal(true),
+                message: z.string(),
+                loan: z.object({
+                    id: z.string(),
+                    previous_status: z.enum(["active", "returned", "overdue"]),
+                }),
+            }),
+            z.object({
+                ok: z.literal(false),
+                message: z.string(),
+            }),
+        ])
     });
 
 export { loans };
