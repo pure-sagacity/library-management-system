@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { Elysia } from "elysia";
 
-const protectRoute = new Elysia()
+const protectRoute = new Elysia({ name: "protectRoute" })
     .onError(() => {
         return new Response("Unauthorized", { status: 401 });
     })
@@ -17,7 +17,7 @@ const protectRoute = new Elysia()
         return { session };
     })
 
-const requireAdmin = new Elysia()
+const requireAdmin = new Elysia({ name: "requireAdmin" })
     .onError(() => {
         return new Response("Forbidden", { status: 403 });
     })

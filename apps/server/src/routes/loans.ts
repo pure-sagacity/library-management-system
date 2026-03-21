@@ -7,7 +7,7 @@ import { db } from '@/lib/db';
 import { book as bookTable, loan } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
 
-const loans = new Elysia()
+const loans = new Elysia({ prefix: '/loans' })
     .use(protectRoute)
     .post("/:id/borrow", async ({ params, session, set }) => {
         const book_id = params.id;

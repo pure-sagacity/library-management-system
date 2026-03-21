@@ -22,7 +22,7 @@ const UpdateBookBodySchema = z.object({
     message: "At least one field is required to update a book.",
 });
 
-const books = new Elysia()
+const books = new Elysia({ prefix: "/books" })
     .get("/", async ({ query }) => {
         const page = query.page;
         const perPage = Math.min(query.perPage, 100);
