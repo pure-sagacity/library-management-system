@@ -11,6 +11,7 @@ const book = pgTable("book", {
     genre: text().$type<Genre>().notNull(),
     publication_year: integer("publication_year").notNull(),
     created_at: timestamp("created_at").notNull().defaultNow(),
+    updated_at: timestamp("updated_at").notNull().defaultNow(),
 });
 
 const loan = pgTable("loan", {
