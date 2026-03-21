@@ -1,4 +1,5 @@
-import { date, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { user } from "./auth-schema";
 
 type Genre = "Fiction" | "Non-Fiction" | "Science Fiction" | "Fantasy" | "Biography" | "History" | "Children's";
@@ -14,13 +15,15 @@ const book = pgTable("book", {
 
 const loan = pgTable("loan", {
     id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-    book_id: text("book_id").notNull().references(() => book.id).references(() => book.id, { onDelete: "cascade" }),
-    user_id: text("user_id").notNull().references(() => user.id).references(() => user.id, { onDelete: "cascade" }),
-    checkout_date: date("checkout_date").notNull().defaultNow(),
-    due_date: date("due_date").notNull(),
+    book_id: text("book_id").notNull().references(() => book.id, { onDelete: "cascade" }),
+    user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    checkout_date: timestamp("checkout_date", { mode: "date" }).notNull().defaultNow(),
+    due_date: timestamp("due_date", { mode: "date" }).notNull(),
     status: text("status").$type<Status>().notNull(), // e.g., "Checked Out", "Returned", "Overdue"
-    returned_at: date("returned_at"),
-});
+    returned_at: timestamp("returned_at", { mode: "date" }),
+}, (table) => [
+    uniqueIndex("loan_active_book_unique").on(table.book_id).where(sql`${table.status} = 'active'`),
+]);
 
 type Book = typeof book.$inferSelect;
 type Loan = typeof loan.$inferSelect;

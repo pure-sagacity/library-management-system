@@ -1,12 +1,14 @@
 import { auth } from "@/lib/auth";
-import Elysia from "elysia";
+import { Elysia } from "elysia";
 
 const protectRoute = new Elysia()
     .onError(() => {
         return new Response("Unauthorized", { status: 401 });
     })
-    .derive(async () => {
-        const session = await auth.api.getSession();
+    .derive({ as: "global" }, async ({ request }) => {
+        const session = await auth.api.getSession({
+            headers: request.headers,
+        });
 
         if (!session) {
             throw new Error("Unauthorized");
@@ -19,8 +21,10 @@ const requireAdmin = new Elysia()
     .onError(() => {
         return new Response("Forbidden", { status: 403 });
     })
-    .derive(async () => {
-        const session = await auth.api.getSession();
+    .derive({ as: "global" }, async ({ request }) => {
+        const session = await auth.api.getSession({
+            headers: request.headers,
+        });
 
         if (!session || !session.user.role || session.user.role !== "admin") {
             throw new Error("Forbidden");
