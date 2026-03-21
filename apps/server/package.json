@@ -1,0 +1,28 @@
+{
+  "name": "@library-management-system/server",
+  "version": "1.0.50",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "bun run --watch src/index.ts",
+    "db:auth": "bunx auth generate --output ./lib/db/schema/auth-schema.ts",
+    "db:push": "bunx drizzle-kit push",
+    "db:generate": "bunx drizzle-kit generate",
+    "db:migrate": "bunx drizzle-kit migrate"
+  },
+  "dependencies": {
+    "@better-auth/passkey": "^1.5.5",
+    "@elysiajs/cors": "^1.4.1",
+    "@neondatabase/serverless": "^1.0.2",
+    "better-auth": "^1.5.5",
+    "dotenv": "^17.3.1",
+    "drizzle-orm": "^0.45.1",
+    "elysia": "latest",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "bun-types": "latest",
+    "drizzle-kit": "^0.31.10"
+  },
+  "module": "src/index.js"
+}
