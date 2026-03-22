@@ -5,7 +5,11 @@ const backendUrl =
     process.env.NEXT_PUBLIC_BACKEND_URL ||
     "http://localhost:3000"
 
-const api = treaty<App>(backendUrl);
+const api = treaty<App>(backendUrl, {
+    fetch: {
+        credentials: "include",
+    },
+});
 
 type GenericError = {
     message?: string;

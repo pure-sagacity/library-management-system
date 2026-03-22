@@ -451,6 +451,80 @@ const loans = new Elysia({ prefix: '/loans' })
             message: z.string(),
         })
     })
+    .post("/:id/renew", async ({ params, session, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
+        const loan_id = params.id;
+
+        requestLogger.debug(
+            {
+                loan_id,
+                userId: session.user.id,
+            },
+            'loans.renew.start',
+        );
+
+        try {
+            const activeLoan = await db
+                .select({ id: loan.id, due_date: loan.due_date })
+                .from(loan)
+                .where(and(eq(loan.id, loan_id), eq(loan.user_id, session.user.id), eq(loan.status, "active")))
+                .limit(1);
+
+            if (activeLoan.length === 0) {
+                set.status = 404;
+                requestLogger.warn(
+                    {
+                        loan_id,
+                        userId: session.user.id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'loans.renew.not_found.active_loan',
+                );
+                return { message: `No active loan found with ID ${loan_id} for the current user.`, ok: false };
+            }
+
+            const previousDueAt = activeLoan[0].due_date;
+            const renewedDueAt = new Date(Date.now() + TIME_LENGTH_DUE_DATE);
+
+            await db.update(loan)
+                .set({ due_date: renewedDueAt })
+                .where(eq(loan.id, loan_id));
+
+            requestLogger.info(
+                {
+                    loan_id,
+                    userId: session.user.id,
+                    previousDueAt: previousDueAt?.toISOString() ?? null,
+                    renewedDueAt: renewedDueAt.toISOString(),
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.renew.success',
+            );
+            return { message: `Loan with ID ${loan_id} has been renewed successfully.`, ok: true };
+        } catch (error) {
+            set.status = 500;
+            requestLogger.error(
+                {
+                    loan_id,
+                    userId: session.user.id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'loans.renew.error',
+            );
+            return { message: 'Failed to renew loan due to an unexpected error.', ok: false };
+        }
+    }, {
+        params: z.object({
+            id: z.string(),
+        }),
+        response: z.object({
+            ok: z.boolean(),
+            message: z.string(),
+        })
+    })
     .post("/:id/return", async ({ params, session, set, request }) => {
         const startedAt = Date.now();
         const requestId = getOrCreateRequestId(request);

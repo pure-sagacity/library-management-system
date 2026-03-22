@@ -3,21 +3,15 @@
 import { api } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 import { StatSkeleton } from "@/components/stat-skeleton";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BookOpen, Clock, RotateCcw, Sparkles } from "lucide-react";
-import { getRandomRecommendation } from "@/constants/recommendations";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-
-const loans = [
-  { id: 1, title: "The Ministry for the Future", author: "Kim Stanley Robinson", coverClass: "bg-amber-700", dueDate: "2026-03-24", daysLeft: 2, genre: "Climate Fiction", canRenew: false },
-  { id: 2, title: "Intermezzo", author: "Sally Rooney", coverClass: "bg-emerald-700", dueDate: "2026-03-27", daysLeft: 5, genre: "Literary Fiction", canRenew: true },
-  { id: 3, title: "Creation Lake", author: "Rachel Kushner", coverClass: "bg-slate-500", dueDate: "2026-04-01", daysLeft: 10, genre: "Thriller", canRenew: true },
-  { id: 4, title: "James", author: "Percival Everett", coverClass: "bg-fuchsia-700", dueDate: "2026-04-08", daysLeft: 17, genre: "Historical Fiction", canRenew: true },
-];
+import { getRandomRecommendation } from "@/constants/recommendations";
+import { getStableColorClass } from "@/constants/colors";
 
 const getDueBadge = (daysLeft: number) => {
   if (daysLeft <= 2) return { label: "Due soon", bg: "bg-red-100", text: "text-red-700" };
@@ -262,43 +256,23 @@ function CurrentLoans() {
     },
   });
 
-  const { data: bookData } = useQuery({
-    queryKey: ["booksForLoans", user?.id],
-    queryFn: async () => {
-      if (!user?.id) {
-        return {};
+  async function renewBook(id: string) {
+    if (!user?.id) {
+      toast.error("You must be logged in to renew a book.");
+      return;
+    }
+
+    toast.promise(
+      api.loans({ id: user.id }).renew.post({
+        loan_id: id,
+      }),
+      {
+        loading: "Renewing book...",
+        success: "Book renewed successfully!",
+        error: "Failed to renew book.",
       }
-
-      const response = await api.loans.users({ user_id: user.id }).current.get();
-
-      if (response.error) {
-        console.error("Failed to fetch current loans for book data", response.error);
-        return {};
-      }
-
-      if (response.data?.ok) {
-        const booksById: Record<string, { title: string; genre: string }> = {};
-        for (const loan of response.data.loans) {
-          if (loan.book_id) {
-            const bookResponse = await api.books({ id: loan.book_id }).get();
-            if (bookResponse) {
-              booksById[loan.book_id] = {
-                title: bookResponse.data?.title ?? "Unknown Title",
-                genre: bookResponse.data?.genre ?? "Unknown Genre",
-              };
-            }
-          }
-        }
-        return booksById;
-      }
-
-      if (response.data && !response.data.ok) {
-        console.error("API error fetching current loans for book data", response.data.message);
-      }
-
-      return {};
-    },
-  })
+    );
+  }
 
   if (!user) {
     return (
@@ -323,7 +297,7 @@ function CurrentLoans() {
       (new Date(loan.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
     );
 
-    const coverClass = "bg-stone-500";
+    const coverClass = getStableColorClass(String(loan.loan_id));
 
     const badge = getDueBadge(daysLeft);
 
@@ -336,8 +310,9 @@ function CurrentLoans() {
       >
         <div className={`w-2 rounded min-h-16 opacity-85 ${coverClass}`} />
         <div className="flex-1 min-w-0">
+          <p className="font-semibold truncate text-stone-900">{loan.title}</p>
           <div className="flex items-center gap-3 mt-2">
-            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-stone-400">{`${bookData ? bookData.genre : "Unknown Genre"}`}</span>
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-stone-400">{loan.genre}</span>
             <span className="text-xs text-stone-400">Due {new Date(loan.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
           </div>
         </div>
@@ -345,7 +320,7 @@ function CurrentLoans() {
           {badge.label}
         </span>
         <div className="flex gap-2">
-          <button className="flex items-center gap-1 rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition-colors hover:bg-amber-50">
+          <button onClick={() => renewBook(loan.loan_id)} className="flex items-center gap-1 rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition-colors hover:bg-amber-50">
             <RotateCcw size={12} /> Renew
           </button>
           <button className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-400 transition-colors hover:bg-stone-50">
@@ -401,7 +376,9 @@ function FeaturedRecommendation() {
         <span className="text-xs font-bold tracking-wider uppercase text-amber-400">Just for You</span>
       </div>
       <p className="text-lg italic font-bold leading-tight text-amber-50">{book?.title ?? "Unknown Title"}</p>
-      <p className="mt-2 text-xs leading-relaxed text-stone-400">{getRandomRecommendation()}</p>
+      <p className="mt-2 text-xs leading-relaxed text-stone-400">
+        {getRandomRecommendation()}
+      </p>
       <motion.button
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
