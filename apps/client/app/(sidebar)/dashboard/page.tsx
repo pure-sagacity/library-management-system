@@ -8,6 +8,9 @@ import { motion } from "framer-motion";
 import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BookOpen, Clock, RotateCcw, Sparkles } from "lucide-react";
+import { getRandomRecommendation } from "@/constants/recommendations";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 const loans = [
   { id: 1, title: "The Ministry for the Future", author: "Kim Stanley Robinson", coverClass: "bg-amber-700", dueDate: "2026-03-24", daysLeft: 2, genre: "Climate Fiction", canRenew: false },
@@ -31,7 +34,7 @@ export default function LibraryDashboard() {
       <div className="max-w-6xl px-6 py-8 mx-auto">
         <div className="mb-8">
           <p className="mb-1 text-xs font-medium tracking-wider uppercase">Good evening</p>
-          <Suspense fallback={<DashboardGreetingSkeleton />}>
+          <Suspense fallback={<DashboardGreeting.Skeleton />}>
             <DashboardGreeting />
           </Suspense>
         </div>
@@ -60,23 +63,9 @@ export default function LibraryDashboard() {
           </div>
 
           <div className="flex flex-col gap-6">
-            <div className="p-5 rounded-xl bg-linear-to-br from-stone-700 to-stone-900">
-              <div className="flex items-center gap-2 mb-3">
-                <Sparkles size={14} className="text-amber-400" />
-                <span className="text-xs font-bold tracking-wider uppercase text-amber-400">Just for You</span>
-              </div>
-              <p className="text-lg italic font-bold leading-tight text-amber-50">"Demon Copperhead"</p>
-              <p className="mt-1 text-xs text-stone-400">Barbara Kingsolver</p>
-              <p className="mt-2 text-xs leading-relaxed text-stone-400">Based on your love of literary fiction and historical narratives. Pulitzer Prize winner.</p>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                transition={{ duration: 0.15, ease: "easeOut" }}
-                className="w-full px-4 py-2 mt-3 text-xs font-bold rounded-lg bg-amber-400 text-stone-900"
-              >
-                View Book
-              </motion.button>
-            </div>
+            <Suspense fallback={<FeaturedRecommendation.Skeleton />}>
+              <FeaturedRecommendation />
+            </Suspense>
           </div>
         </div>
       </div>
@@ -114,6 +103,14 @@ function DashboardGreeting() {
     </h1>
   );
 }
+
+function DashboardGreetingSkeleton() {
+  return (
+    <Skeleton className="w-64 h-10" />
+  );
+}
+
+DashboardGreeting.Skeleton = DashboardGreetingSkeleton;
 
 function BooksReadStat() {
   const { data: sessionState } = useDashboardSession();
@@ -372,8 +369,68 @@ function CurrentLoansSkeleton() {
 
 CurrentLoans.Skeleton = CurrentLoansSkeleton;
 
-function DashboardGreetingSkeleton() {
+function FeaturedRecommendation() {
+  const router = useRouter();
+
+  const { data } = useSuspenseQuery({
+    queryKey: ["featuredRecommendation"],
+    queryFn: async () => {
+      const response = await api.books.featured.get();
+
+      if (response.error) {
+        console.error("Failed to fetch featured recommendation", response.error);
+        return null;
+      }
+
+      if (response.data) {
+        return response.data;
+      }
+
+      if (response.data && !response.data) {
+        console.error("API error fetching featured recommendation", response.error);
+      }
+    },
+  });
+
+  const book = data;
+
   return (
-    <Skeleton className="w-64 h-10" />
+    <div className="p-5 rounded-xl bg-linear-to-br from-stone-700 to-stone-900" >
+      <div className="flex items-center gap-2 mb-3">
+        <Sparkles size={14} className="text-amber-400" />
+        <span className="text-xs font-bold tracking-wider uppercase text-amber-400">Just for You</span>
+      </div>
+      <p className="text-lg italic font-bold leading-tight text-amber-50">{book?.title ?? "Unknown Title"}</p>
+      <p className="mt-2 text-xs leading-relaxed text-stone-400">{getRandomRecommendation()}</p>
+      <motion.button
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        transition={{ duration: 0.15, ease: "easeOut" }}
+        onClick={() => {
+          if (book?.id) {
+            router.push(`/book/${book.id}`);
+          } else {
+            toast.error("Book details page not implemented yet.");
+          }
+        }}
+        className="w-full px-4 py-2 mt-3 text-xs font-bold rounded-lg bg-amber-400 text-stone-900"
+      >
+        View Book
+      </motion.button>
+    </div>
   );
 }
+
+function FeaturedRecommendationSkeleton() {
+  return (
+    <div className="p-5 rounded-xl bg-linear-to-br from-stone-700 to-stone-900" >
+      <Skeleton className="w-32 h-4 mb-3" />
+      <Skeleton className="w-full h-6 mb-1" />
+      <Skeleton className="w-24 h-3 mb-2" />
+      <Skeleton className="w-full h-3 mb-4" />
+      <Skeleton className="w-full h-8" />
+    </div >
+  );
+}
+
+FeaturedRecommendation.Skeleton = FeaturedRecommendationSkeleton;
