@@ -3,7 +3,7 @@
 import { api } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 import { StatSkeleton } from "@/components/stat-skeleton";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -53,40 +53,9 @@ export default function LibraryDashboard() {
               <span className="text-xs text-stone-500">Sorted by due date</span>
             </div>
             <div className="flex flex-col gap-3">
-              {loans.map((book) => {
-                const badge = getDueBadge(book.daysLeft);
-                return (
-                  <motion.div
-                    key={book.id}
-                    whileHover={{ y: -2, boxShadow: "0 8px 24px rgba(0,0,0,0.10)" }}
-                    transition={{ duration: 0.2, ease: "easeOut" }}
-                    className="flex items-center gap-4 p-4 bg-white border rounded-xl border-stone-200"
-                  >
-                    <div className={`w-2 rounded min-h-16 opacity-85 ${book.coverClass}`} />
-                    <div className="flex-1 min-w-0">
-                      <div>
-                        <p className="text-base font-bold leading-tight text-stone-900">{book.title}</p>
-                        <p className="mt-0.5 text-xs text-stone-500">{book.author}</p>
-                      </div>
-                      <div className="flex items-center gap-3 mt-2">
-                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-stone-400">{book.genre}</span>
-                        <span className="text-xs text-stone-400">Due {new Date(book.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                      </div>
-                    </div>
-                    <span className={`${badge.bg} ${badge.text} inline-flex items-center self-center text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap`}>
-                      {badge.label}
-                    </span>
-                    <div className="flex gap-2">
-                      <button className="flex items-center gap-1 rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition-colors hover:bg-amber-50">
-                        <RotateCcw size={12} /> Renew
-                      </button>
-                      <button className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-400 transition-colors hover:bg-stone-50">
-                        Return
-                      </button>
-                    </div>
-                  </motion.div>
-                );
-              })}
+              <Suspense fallback={<CurrentLoans.Skeleton />}>
+                <CurrentLoans />
+              </Suspense>
             </div>
           </div>
 
@@ -105,7 +74,7 @@ export default function LibraryDashboard() {
                 transition={{ duration: 0.15, ease: "easeOut" }}
                 className="w-full px-4 py-2 mt-3 text-xs font-bold rounded-lg bg-amber-400 text-stone-900"
               >
-                Place Hold
+                View Book
               </motion.button>
             </div>
           </div>
@@ -285,25 +254,7 @@ function CurrentLoans() {
       }
 
       if (response.data?.ok) {
-        const loansWithBooks = await Promise.all(
-          response.data.loans.map(async (loan) => {
-            const bookResponse = await api.books({ id: loan.book_id }).get();
-
-            if (bookResponse.error || !bookResponse.data) {
-              return {
-                ...loan,
-                book: null,
-              };
-            }
-
-            return {
-              ...loan,
-              book: bookResponse.data,
-            };
-          })
-        );
-
-        return loansWithBooks;
+        return response.data.loans;
       }
 
       if (response.data && !response.data.ok) {
@@ -313,6 +264,44 @@ function CurrentLoans() {
       return [];
     },
   });
+
+  const { data: bookData } = useQuery({
+    queryKey: ["booksForLoans", user?.id],
+    queryFn: async () => {
+      if (!user?.id) {
+        return {};
+      }
+
+      const response = await api.loans.users({ user_id: user.id }).current.get();
+
+      if (response.error) {
+        console.error("Failed to fetch current loans for book data", response.error);
+        return {};
+      }
+
+      if (response.data?.ok) {
+        const booksById: Record<string, { title: string; genre: string }> = {};
+        for (const loan of response.data.loans) {
+          if (loan.book_id) {
+            const bookResponse = await api.books({ id: loan.book_id }).get();
+            if (bookResponse) {
+              booksById[loan.book_id] = {
+                title: bookResponse.data?.title ?? "Unknown Title",
+                genre: bookResponse.data?.genre ?? "Unknown Genre",
+              };
+            }
+          }
+        }
+        return booksById;
+      }
+
+      if (response.data && !response.data.ok) {
+        console.error("API error fetching current loans for book data", response.data.message);
+      }
+
+      return {};
+    },
+  })
 
   if (!user) {
     return (
@@ -338,7 +327,6 @@ function CurrentLoans() {
     );
 
     const coverClass = "bg-stone-500";
-    const bookGenre = loan.book?.genre ?? loan.genre;
 
     const badge = getDueBadge(daysLeft);
 
@@ -352,7 +340,7 @@ function CurrentLoans() {
         <div className={`w-2 rounded min-h-16 opacity-85 ${coverClass}`} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 mt-2">
-            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-stone-400">{bookGenre}</span>
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-stone-400">{`${bookData ? bookData.genre : "Unknown Genre"}`}</span>
             <span className="text-xs text-stone-400">Due {new Date(loan.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
           </div>
         </div>
@@ -371,6 +359,18 @@ function CurrentLoans() {
     );
   });
 }
+
+function CurrentLoansSkeleton() {
+  return (
+    <div className="space-y-3">
+      <Skeleton className="h-16" />
+      <Skeleton className="h-16" />
+      <Skeleton className="h-16" />
+    </div>
+  )
+}
+
+CurrentLoans.Skeleton = CurrentLoansSkeleton;
 
 function DashboardGreetingSkeleton() {
   return (
