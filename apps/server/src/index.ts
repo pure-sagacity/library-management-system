@@ -44,3 +44,4 @@ logger.info(
 );
 
 export type App = typeof app;
+export type { Book, Genre, Loan, Status, User } from "../lib/db/schema";

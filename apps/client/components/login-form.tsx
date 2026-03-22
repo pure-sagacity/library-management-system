@@ -56,9 +56,7 @@ export function LoginForm({
         return;
       }
 
-      if (response.data.redirect) {
-        router.push("/dashboard");
-      }
+      router.push("/dashboard");
     } catch (error) {
       const message = getAuthErrorMessage(error, "Login failed. Please try again.");
       toast.error(message);

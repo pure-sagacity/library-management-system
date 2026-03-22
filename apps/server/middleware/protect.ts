@@ -16,7 +16,7 @@ const protectRoute = new Elysia({ name: "protectRoute" })
 
         return new Response("Unauthorized", { status: 401 });
     })
-    .derive({ as: "global" }, async ({ request }) => {
+    .derive({ as: "scoped" }, async ({ request }) => {
         const startedAt = Date.now();
         const requestId = getOrCreateRequestId(request);
         const requestLogger = buildRequestLogger(request, requestId);
@@ -63,7 +63,7 @@ const requireAdmin = new Elysia({ name: "requireAdmin" })
 
         return new Response("Forbidden", { status: 403 });
     })
-    .derive({ as: "global" }, async ({ request }) => {
+    .derive({ as: "scoped" }, async ({ request }) => {
         const startedAt = Date.now();
         const requestId = getOrCreateRequestId(request);
         const requestLogger = buildRequestLogger(request, requestId);

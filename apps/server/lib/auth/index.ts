@@ -6,9 +6,16 @@ import { passkey } from "@better-auth/passkey";
 import { account, session, user, verification } from "../db/schema";
 import { logger } from "@/lib/logger";
 
+const trustedOrigins = [
+    process.env.CORS_ORIGIN,
+    process.env.FRONTEND_URL,
+    "http://localhost:5173",
+].filter((origin): origin is string => Boolean(origin));
+
 logger.info(
     {
         basePath: "/api",
+        trustedOrigins,
         emailPasswordEnabled: true,
         passkeyEnabled: true,
         adminPluginEnabled: true,
@@ -17,6 +24,7 @@ logger.info(
 );
 
 export const auth = betterAuth({
+    trustedOrigins,
     database: drizzleAdapter(db, {
         provider: "pg", // or "mysql", "sqlite"
         schema: {
