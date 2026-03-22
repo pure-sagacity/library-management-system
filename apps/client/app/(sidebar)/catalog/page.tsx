@@ -1,19 +1,17 @@
 "use client";
 
-import debounce from "lodash.debounce";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import BookCard from "@/components/book-card";
 import { Button } from "@/components/ui/button";
 import {
     Card,
-    CardContent,
     CardDescription,
     CardHeader,
     CardTitle,
+    CardContent
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
     Pagination,
     PaginationContent,
@@ -27,7 +25,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, getAuthErrorMessage } from "@/lib/api";
 
 const PER_PAGE_OPTIONS = [10, 20, 50] as const;
-const SEARCH_DEBOUNCE_MS = 450;
 const MAX_VISIBLE_PAGE_LINKS = 5;
 
 type PaginationToken = number | "left-ellipsis" | "right-ellipsis";
@@ -74,43 +71,17 @@ const buildPageTokens = (
 export default function Catalog() {
     const [page, setPage] = useState<number>(1);
     const [perPage, setPerPage] = useState<number>(20);
-    const [searchInput, setSearchInput] = useState<string>("");
-    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>("");
-
-    const updateSearch = useMemo(
-        () =>
-            debounce((value: string) => {
-                setDebouncedSearchQuery(value.trim());
-                setPage(1);
-            }, SEARCH_DEBOUNCE_MS),
-        [],
-    );
-
-    useEffect(() => {
-        return () => {
-            updateSearch.cancel();
-        };
-    }, [updateSearch]);
 
     const { data, isError, error, isLoading, isFetching, refetch } = useQuery({
-        queryKey: ["catalog-books", page, perPage, debouncedSearchQuery],
+        queryKey: ["catalog-books", page, perPage],
         placeholderData: keepPreviousData,
         queryFn: async () => {
-            const hasSearchQuery = debouncedSearchQuery.length > 0;
-            const response = hasSearchQuery
-                ? await api.books.search.get({
-                    query: {
-                        q: debouncedSearchQuery,
-                        page,
-                        perPage,
-                    },
-                })
-                : await api.books.get({
-                    query: {
-                        page,
-                        perPage,
-                    },
-                });
+            const response = await api.books.get({
+                query: {
+                    page,
+                    perPage,
+                },
+            });
 
             if (response.error) {
                 throw new Error(
@@ -140,19 +111,6 @@ export default function Catalog() {
     const visibleStart = totalItems === 0 ? 0 : (currentPage - 1) * perPage + 1;
     const visibleEnd = totalItems === 0 ? 0 : Math.min(currentPage * perPage, totalItems);
     const pageTokens = buildPageTokens(currentPage, totalPages);
-    const hasSearch = debouncedSearchQuery.length > 0;
-
-    const handleSearchChange = (value: string) => {
-        setSearchInput(value);
-        updateSearch(value);
-    };
-
-    const handleClearSearch = () => {
-        setSearchInput("");
-        setDebouncedSearchQuery("");
-        setPage(1);
-        updateSearch.cancel();
-    };
 
     const handlePerPageChange = (value: number) => {
         setPerPage(value);
@@ -172,60 +130,29 @@ export default function Catalog() {
             <div className="space-y-1">
                 <h2 className="text-2xl font-bold tracking-tight">Catalog</h2>
                 <p className="text-muted-foreground">
-                    Browse all available books with paginated results and quick search.
+                    Browse all available books with paginated results.
                 </p>
             </div>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Find Books</CardTitle>
-                    <CardDescription>
-                        Search by title or genre, choose page size, and navigate with pagination.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 md:grid-cols-[1fr_auto]">
-                    <div className="space-y-2">
-                        <label htmlFor="catalog-search" className="text-sm font-medium">
-                            Search books
-                        </label>
-                        <Input
-                            id="catalog-search"
-                            value={searchInput}
-                            onChange={(event) => handleSearchChange(event.target.value)}
-                            placeholder="Search by title or genre"
-                        />
-                    </div>
-
-                    <div className="flex items-end gap-2">
-                        <div className="space-y-2">
-                            <label htmlFor="catalog-per-page" className="text-sm font-medium">
-                                Books per page
-                            </label>
-                            <select
-                                id="catalog-per-page"
-                                className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-                                value={perPage}
-                                onChange={(event) => handlePerPageChange(Number(event.target.value))}
-                            >
-                                {PER_PAGE_OPTIONS.map((option) => (
-                                    <option key={option} value={option}>
-                                        {option}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <Button
-                            type="button"
-                            variant="outline"
-                            disabled={searchInput.length === 0}
-                            onClick={handleClearSearch}
-                        >
-                            Clear
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
+            <div className="flex items-center justify-between">
+                <div>
+                    <label htmlFor="catalog-per-page" className="text-sm font-medium">
+                        Books per page
+                    </label>
+                    <select
+                        id="catalog-per-page"
+                        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm ml-2"
+                        value={perPage}
+                        onChange={(event) => handlePerPageChange(Number(event.target.value))}
+                    >
+                        {PER_PAGE_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                                {option}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm text-muted-foreground">
@@ -271,9 +198,7 @@ export default function Catalog() {
                     <CardHeader>
                         <CardTitle>No books found</CardTitle>
                         <CardDescription>
-                            {hasSearch
-                                ? `No results matched "${debouncedSearchQuery}". Try a different keyword.`
-                                : "There are no books in the catalog yet."}
+                            There are no books in the catalog yet.
                         </CardDescription>
                     </CardHeader>
                 </Card>

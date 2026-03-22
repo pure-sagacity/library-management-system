@@ -4,7 +4,7 @@ import { getPaginatedBooks } from '@/lib/db/queries/books';
 import { protectRoute, requireAdmin } from '@/middleware/protect';
 import { db } from '@/lib/db';
 import { book as bookTable, loan } from '@/lib/db/schema';
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { buildRequestLogger, getOrCreateRequestId, toErrorDetails } from '@/lib/logger';
 import { getBookSummary } from '../../functions/getSummary';
 
@@ -27,6 +27,16 @@ const UpdateBookBodySchema = z.object({
 const BookSummarySchema = z.object({
     source: z.string().nullable(),
     summary: z.string().nullable(),
+});
+
+const BookLoanHistorySchema = z.object({
+    id: z.string(),
+    user_id: z.string(),
+    book_id: z.string(),
+    checkout_date: z.date(),
+    due_date: z.date(),
+    returned_at: z.date().nullable(),
+    status: z.enum(["active", "returned", "overdue"]),
 });
 
 const books = new Elysia({ prefix: "/books" })
@@ -325,6 +335,80 @@ const books = new Elysia({ prefix: "/books" })
             id: z.string(),
         }),
         response: BookSummarySchema,
+    })
+    .get("/:id/loans", async ({ params, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
+        const book_id = params.id;
+
+        requestLogger.debug(
+            {
+                book_id,
+            },
+            'books.get_loans.start',
+        );
+
+        try {
+            const existingBook = await db
+                .select({ id: bookTable.id })
+                .from(bookTable)
+                .where(eq(bookTable.id, book_id))
+                .limit(1);
+
+            if (existingBook.length === 0) {
+                set.status = 404;
+                requestLogger.warn(
+                    {
+                        book_id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'books.get_loans.not_found',
+                );
+                return [];
+            }
+
+            const loans = await db
+                .select({
+                    id: loan.id,
+                    user_id: loan.user_id,
+                    book_id: loan.book_id,
+                    checkout_date: loan.checkout_date,
+                    due_date: loan.due_date,
+                    returned_at: loan.returned_at,
+                    status: loan.status,
+                })
+                .from(loan)
+                .where(eq(loan.book_id, book_id))
+                .orderBy(desc(loan.checkout_date));
+
+            requestLogger.info(
+                {
+                    book_id,
+                    returnedCount: loans.length,
+                    durationMs: Date.now() - startedAt,
+                },
+                'books.get_loans.success',
+            );
+
+            return loans;
+        } catch (error) {
+            set.status = 500;
+            requestLogger.error(
+                {
+                    book_id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'books.get_loans.error',
+            );
+            return [];
+        }
+    }, {
+        params: z.object({
+            id: z.string(),
+        }),
+        response: z.array(BookLoanHistorySchema),
     })
     .use(protectRoute)
     .use(requireAdmin)
