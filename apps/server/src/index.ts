@@ -6,6 +6,7 @@ import { logger, toErrorDetails } from '@/lib/logger';
 // Routes
 import { books } from './routes/books';
 import { loans } from './routes/loans';
+import { user } from './routes/user';
 import swagger from '@elysiajs/swagger';
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -34,6 +35,7 @@ const app = new Elysia()
     .use(swagger())
     .use(books)
     .use(loans)
+    .use(user)
     .mount("/auth", auth.handler)
     .listen(PORT);
 
