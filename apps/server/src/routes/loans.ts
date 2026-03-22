@@ -5,11 +5,355 @@ import z from "zod";
 import { protectRoute, requireAdmin } from '@/middleware/protect';
 import { db } from '@/lib/db';
 import { book as bookTable, loan } from '@/lib/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, asc, count, eq, inArray } from 'drizzle-orm';
 import { buildRequestLogger, getOrCreateRequestId, toErrorDetails } from '@/lib/logger';
+import { cleanupOrphanLoans } from '@/lib/db/queries/orphan-loans';
+
+const LoanStatusSchema = z.enum(["active", "returned", "overdue"]);
+
+const CurrentLoanSchema = z.object({
+    loan_id: z.string(),
+    book_id: z.string(),
+    title: z.string(),
+    genre: z.enum(["Fiction", "Non-Fiction", "Science Fiction", "Fantasy", "Biography", "History", "Children's"]),
+    publication_year: z.number(),
+    checkout_date: z.date(),
+    due_date: z.date(),
+    status: LoanStatusSchema,
+});
+
+const LoanAccessDeniedSchema = z.object({
+    ok: z.literal(false),
+    message: z.string(),
+});
+
+const MAX_LOGGED_ORPHAN_LOAN_IDS = 3;
+
+const runOrphanCleanupForRead = async ({
+    requestLogger,
+    route,
+}: {
+    requestLogger: ReturnType<typeof buildRequestLogger>;
+    route: string;
+}): Promise<number> => {
+    try {
+        const cleanupResult = await cleanupOrphanLoans();
+
+        if (cleanupResult.deletedCount > 0) {
+            requestLogger.warn(
+                {
+                    deletedCount: cleanupResult.deletedCount,
+                    deletedLoanIdsSample: cleanupResult.deletedLoanIds.slice(0, MAX_LOGGED_ORPHAN_LOAN_IDS),
+                },
+                `${route}.orphan_cleanup.deleted`,
+            );
+        }
+
+        return cleanupResult.deletedCount;
+    } catch (error) {
+        requestLogger.error(
+            {
+                error: toErrorDetails(error),
+            },
+            `${route}.orphan_cleanup.error`,
+        );
+        return 0;
+    }
+};
 
 const loans = new Elysia({ prefix: '/loans' })
     .use(protectRoute)
+    .get("/users/:user_id/total-books", async ({ params, session, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
+        const user_id = params.user_id;
+
+        requestLogger.debug(
+            {
+                user_id,
+                requesterUserId: session.user.id,
+                requesterRole: session.user.role ?? null,
+            },
+            'loans.totalBooks.start',
+        );
+
+        const canAccessUserData = session.user.id === user_id || session.user.role === "admin";
+
+        if (!canAccessUserData) {
+            set.status = 403;
+            requestLogger.warn(
+                {
+                    user_id,
+                    requesterUserId: session.user.id,
+                    requesterRole: session.user.role ?? null,
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.totalBooks.forbidden',
+            );
+            return {
+                ok: false,
+                message: 'You are not authorized to access this user data.',
+            };
+        }
+
+        try {
+            const orphanLoansDeleted = await runOrphanCleanupForRead({
+                requestLogger,
+                route: 'loans.totalBooks',
+            });
+
+            const [result] = await db
+                .select({ totalBooks: count(loan.id) })
+                .from(loan)
+                .where(eq(loan.user_id, user_id));
+
+            requestLogger.info(
+                {
+                    user_id,
+                    requesterUserId: session.user.id,
+                    totalBooks: result.totalBooks,
+                    orphanLoansDeleted,
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.totalBooks.success',
+            );
+
+            return {
+                ok: true,
+                user_id,
+                totalBooks: result.totalBooks,
+            };
+        } catch (error) {
+            set.status = 500;
+            requestLogger.error(
+                {
+                    user_id,
+                    requesterUserId: session.user.id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'loans.totalBooks.error',
+            );
+            return {
+                ok: false,
+                message: 'Failed to fetch total borrowed books due to an unexpected error.',
+            };
+        }
+    }, {
+        params: z.object({
+            user_id: z.string(),
+        }),
+        response: z.union([
+            z.object({
+                ok: z.literal(true),
+                user_id: z.string(),
+                totalBooks: z.number(),
+            }),
+            LoanAccessDeniedSchema,
+        ]),
+    })
+    .get("/users/:user_id/active-count", async ({ params, session, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
+        const user_id = params.user_id;
+
+        requestLogger.debug(
+            {
+                user_id,
+                requesterUserId: session.user.id,
+                requesterRole: session.user.role ?? null,
+            },
+            'loans.activeCount.start',
+        );
+
+        const canAccessUserData = session.user.id === user_id || session.user.role === "admin";
+
+        if (!canAccessUserData) {
+            set.status = 403;
+            requestLogger.warn(
+                {
+                    user_id,
+                    requesterUserId: session.user.id,
+                    requesterRole: session.user.role ?? null,
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.activeCount.forbidden',
+            );
+            return {
+                ok: false,
+                message: 'You are not authorized to access this user data.',
+            };
+        }
+
+        try {
+            const orphanLoansDeleted = await runOrphanCleanupForRead({
+                requestLogger,
+                route: 'loans.activeCount',
+            });
+
+            const [result] = await db
+                .select({ activeLoans: count(loan.id) })
+                .from(loan)
+                .where(
+                    and(
+                        eq(loan.user_id, user_id),
+                        inArray(loan.status, ["active", "overdue"]),
+                    ),
+                );
+
+            requestLogger.info(
+                {
+                    user_id,
+                    requesterUserId: session.user.id,
+                    activeLoans: result.activeLoans,
+                    orphanLoansDeleted,
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.activeCount.success',
+            );
+
+            return {
+                ok: true,
+                user_id,
+                activeLoans: result.activeLoans,
+            };
+        } catch (error) {
+            set.status = 500;
+            requestLogger.error(
+                {
+                    user_id,
+                    requesterUserId: session.user.id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'loans.activeCount.error',
+            );
+            return {
+                ok: false,
+                message: 'Failed to fetch active loans due to an unexpected error.',
+            };
+        }
+    }, {
+        params: z.object({
+            user_id: z.string(),
+        }),
+        response: z.union([
+            z.object({
+                ok: z.literal(true),
+                user_id: z.string(),
+                activeLoans: z.number(),
+            }),
+            LoanAccessDeniedSchema,
+        ]),
+    })
+    .get("/users/:user_id/current", async ({ params, session, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
+        const user_id = params.user_id;
+
+        requestLogger.debug(
+            {
+                user_id,
+                requesterUserId: session.user.id,
+                requesterRole: session.user.role ?? null,
+            },
+            'loans.current.start',
+        );
+
+        const canAccessUserData = session.user.id === user_id || session.user.role === "admin";
+
+        if (!canAccessUserData) {
+            set.status = 403;
+            requestLogger.warn(
+                {
+                    user_id,
+                    requesterUserId: session.user.id,
+                    requesterRole: session.user.role ?? null,
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.current.forbidden',
+            );
+            return {
+                ok: false,
+                message: 'You are not authorized to access this user data.',
+            };
+        }
+
+        try {
+            const orphanLoansDeleted = await runOrphanCleanupForRead({
+                requestLogger,
+                route: 'loans.current',
+            });
+
+            const currentLoans = await db
+                .select({
+                    loan_id: loan.id,
+                    book_id: loan.book_id,
+                    title: bookTable.title,
+                    genre: bookTable.genre,
+                    publication_year: bookTable.publication_year,
+                    checkout_date: loan.checkout_date,
+                    due_date: loan.due_date,
+                    status: loan.status,
+                })
+                .from(loan)
+                .innerJoin(bookTable, eq(loan.book_id, bookTable.id))
+                .where(
+                    and(
+                        eq(loan.user_id, user_id),
+                        inArray(loan.status, ["active", "overdue"]),
+                    ),
+                )
+                .orderBy(asc(loan.due_date));
+
+            requestLogger.info(
+                {
+                    user_id,
+                    requesterUserId: session.user.id,
+                    returnedCount: currentLoans.length,
+                    orphanLoansDeleted,
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.current.success',
+            );
+
+            return {
+                ok: true,
+                user_id,
+                loans: currentLoans,
+            };
+        } catch (error) {
+            set.status = 500;
+            requestLogger.error(
+                {
+                    user_id,
+                    requesterUserId: session.user.id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'loans.current.error',
+            );
+            return {
+                ok: false,
+                message: 'Failed to fetch current loans due to an unexpected error.',
+            };
+        }
+    }, {
+        params: z.object({
+            user_id: z.string(),
+        }),
+        response: z.union([
+            z.object({
+                ok: z.literal(true),
+                user_id: z.string(),
+                loans: z.array(CurrentLoanSchema),
+            }),
+            LoanAccessDeniedSchema,
+        ]),
+    })
     .post("/:id/borrow", async ({ params, session, set, request }) => {
         const startedAt = Date.now();
         const requestId = getOrCreateRequestId(request);

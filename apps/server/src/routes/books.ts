@@ -199,6 +199,59 @@ const books = new Elysia({ prefix: "/books" })
             perPage: z.coerce.number().int().min(1).default(20),
         })
     })
+    .get("/featured", async ({ set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
+
+        requestLogger.debug({}, 'books.featured.start');
+
+        try {
+            const featuredBook = await db
+                .select({
+                    id: bookTable.id,
+                    title: bookTable.title,
+                    genre: bookTable.genre,
+                    publication_year: bookTable.publication_year,
+                    created_at: bookTable.created_at,
+                })
+                .from(bookTable)
+                .orderBy(sql`RANDOM()`)
+                .limit(1);
+
+            if (featuredBook.length === 0) {
+                requestLogger.info(
+                    {
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'books.featured.empty',
+                );
+                return null;
+            }
+
+            requestLogger.info(
+                {
+                    book_id: featuredBook[0].id,
+                    durationMs: Date.now() - startedAt,
+                },
+                'books.featured.success',
+            );
+
+            return featuredBook[0];
+        } catch (error) {
+            set.status = 500;
+            requestLogger.error(
+                {
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'books.featured.error',
+            );
+            return null;
+        }
+    }, {
+        response: z.nullable(BookSchema),
+    })
     .get("/:id", async ({ params, set, request }) => {
         const startedAt = Date.now();
         const requestId = getOrCreateRequestId(request);

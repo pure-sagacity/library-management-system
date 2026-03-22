@@ -1,8 +1,8 @@
 "use client";
 
 import debounce from "lodash.debounce";
-import { useEffect, useMemo, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { keepPreviousData, useSuspenseQuery } from "@tanstack/react-query";
 
 import BookCard from "@/components/book-card";
 import { Button } from "@/components/ui/button";
@@ -92,53 +92,6 @@ export default function Search() {
         };
     }, [updateSearch]);
 
-    const { data, isError, error, isLoading, isFetching, refetch } = useQuery({
-        queryKey: ["search-books", page, perPage, debouncedSearchQuery],
-        placeholderData: keepPreviousData,
-        queryFn: async () => {
-            const hasSearchQuery = debouncedSearchQuery.length > 0;
-            if (!hasSearchQuery) {
-                throw new Error("Please enter a search query.");
-            }
-
-            const response = await api.books.search.get({
-                query: {
-                    q: debouncedSearchQuery,
-                    page,
-                    perPage,
-                },
-            });
-
-            if (response.error) {
-                throw new Error(
-                    getAuthErrorMessage(
-                        response.error.value ?? response.error,
-                        "Failed to search books.",
-                    ),
-                );
-            }
-
-            if (!response.data) {
-                throw new Error("Search response was empty.");
-            }
-
-            return response.data;
-        },
-        enabled: debouncedSearchQuery.length > 0,
-    });
-
-    const books = data?.books ?? [];
-    const metadata = data?.metadata;
-    const totalItems = metadata?.totalItems ?? 0;
-    const currentPage = metadata?.currentPage ?? page;
-    const totalPages = Math.max(metadata?.totalPages ?? 1, 1);
-    const hasPreviousPage = metadata?.hasPreviousPage ?? currentPage > 1;
-    const hasNextPage = metadata?.hasNextPage ?? currentPage < totalPages;
-
-    const visibleStart = totalItems === 0 ? 0 : (currentPage - 1) * perPage + 1;
-    const visibleEnd = totalItems === 0 ? 0 : Math.min(currentPage * perPage, totalItems);
-    const pageTokens = buildPageTokens(currentPage, totalPages);
-
     const handleSearchChange = (value: string) => {
         setSearchInput(value);
         updateSearch(value);
@@ -154,14 +107,6 @@ export default function Search() {
     const handlePerPageChange = (value: number) => {
         setPerPage(value);
         setPage(1);
-    };
-
-    const handlePageChange = (nextPage: number) => {
-        if (nextPage < 1 || nextPage > totalPages || nextPage === currentPage) {
-            return;
-        }
-
-        setPage(nextPage);
     };
 
     return (
@@ -234,123 +179,209 @@ export default function Search() {
                     </CardHeader>
                 </Card>
             ) : (
-                <>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm text-muted-foreground">
-                            Showing {visibleStart}-{visibleEnd} of {totalItems} books
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                            Page {currentPage} of {totalPages}
-                            {isFetching && !isLoading ? " (updating...)" : ""}
-                        </p>
-                    </div>
-
-                    {isLoading ? (
-                        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                            {Array.from({ length: 6 }, (_, index) => (
-                                <div key={`search-skeleton-${index}`} className="p-4 border rounded-lg">
-                                    <Skeleton className="w-3/4 h-6 mb-3" />
-                                    <Skeleton className="w-1/2 h-4" />
-                                </div>
-                            ))}
-                        </div>
-                    ) : null}
-
-                    {isError ? (
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Couldn&apos;t search books</CardTitle>
-                                <CardDescription>
-                                    {error instanceof Error
-                                        ? error.message
-                                        : "Something went wrong while searching."}
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <Button type="button" onClick={() => void refetch()}>
-                                    Try Again
-                                </Button>
-                            </CardContent>
-                        </Card>
-                    ) : null}
-
-                    {!isLoading && !isError && books.length === 0 ? (
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>No books found</CardTitle>
-                                <CardDescription>
-                                    No results matched "{debouncedSearchQuery}". Try a different keyword.
-                                </CardDescription>
-                            </CardHeader>
-                        </Card>
-                    ) : null}
-
-                    {!isLoading && !isError && books.length > 0 ? (
-                        <>
-                            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                                {books.map((book) => (
-                                    <BookCard key={book.id} book={book} />
-                                ))}
-                            </div>
-
-                            <Pagination>
-                                <PaginationContent>
-                                    <PaginationItem>
-                                        <PaginationLink
-                                            disabled={!hasPreviousPage}
-                                            onClick={() => handlePageChange(1)}
-                                        >
-                                            First
-                                        </PaginationLink>
-                                    </PaginationItem>
-                                    <PaginationItem>
-                                        <PaginationPrevious
-                                            disabled={!hasPreviousPage}
-                                            onClick={() => handlePageChange(currentPage - 1)}
-                                        />
-                                    </PaginationItem>
-
-                                    {pageTokens.map((token) => {
-                                        if (typeof token !== "number") {
-                                            return (
-                                                <PaginationItem key={token}>
-                                                    <PaginationEllipsis />
-                                                </PaginationItem>
-                                            );
-                                        }
-
-                                        return (
-                                            <PaginationItem key={token}>
-                                                <PaginationLink
-                                                    isActive={token === currentPage}
-                                                    onClick={() => handlePageChange(token)}
-                                                >
-                                                    {token}
-                                                </PaginationLink>
-                                            </PaginationItem>
-                                        );
-                                    })}
-
-                                    <PaginationItem>
-                                        <PaginationNext
-                                            disabled={!hasNextPage}
-                                            onClick={() => handlePageChange(currentPage + 1)}
-                                        />
-                                    </PaginationItem>
-                                    <PaginationItem>
-                                        <PaginationLink
-                                            disabled={!hasNextPage}
-                                            onClick={() => handlePageChange(totalPages)}
-                                        >
-                                            Last
-                                        </PaginationLink>
-                                    </PaginationItem>
-                                </PaginationContent>
-                            </Pagination>
-                        </>
-                    ) : null}
-                </>
+                <Suspense fallback={<SearchResultsSkeleton />}>
+                    <SearchResults
+                        page={page}
+                        perPage={perPage}
+                        debouncedSearchQuery={debouncedSearchQuery}
+                        onPageChange={setPage}
+                    />
+                </Suspense>
             )}
         </section>
+    );
+}
+
+type SearchResultsProps = {
+    page: number;
+    perPage: number;
+    debouncedSearchQuery: string;
+    onPageChange: (page: number) => void;
+};
+
+function SearchResults({
+    page,
+    perPage,
+    debouncedSearchQuery,
+    onPageChange,
+}: SearchResultsProps) {
+    const { data: result, isFetching, refetch } = useSuspenseQuery({
+        queryKey: ["search-books", page, perPage, debouncedSearchQuery],
+        placeholderData: keepPreviousData,
+        queryFn: async () => {
+            const response = await api.books.search.get({
+                query: {
+                    q: debouncedSearchQuery,
+                    page,
+                    perPage,
+                },
+            });
+
+            if (response.error) {
+                return {
+                    ok: false as const,
+                    message: getAuthErrorMessage(
+                        response.error.value ?? response.error,
+                        "Failed to search books.",
+                    ),
+                };
+            }
+
+            if (!response.data) {
+                return {
+                    ok: false as const,
+                    message: "Search response was empty.",
+                };
+            }
+
+            return {
+                ok: true as const,
+                data: response.data,
+            };
+        },
+    });
+
+    if (!result.ok) {
+        return (
+            <Card>
+                <CardHeader>
+                    <CardTitle>Couldn&apos;t search books</CardTitle>
+                    <CardDescription>{result.message}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <Button type="button" onClick={() => void refetch()}>
+                        Try Again
+                    </Button>
+                </CardContent>
+            </Card>
+        );
+    }
+
+    const books = result.data.books;
+    const metadata = result.data.metadata;
+    const totalItems = metadata?.totalItems ?? 0;
+    const currentPage = metadata?.currentPage ?? page;
+    const totalPages = Math.max(metadata?.totalPages ?? 1, 1);
+    const hasPreviousPage = metadata?.hasPreviousPage ?? currentPage > 1;
+    const hasNextPage = metadata?.hasNextPage ?? currentPage < totalPages;
+
+    const visibleStart = totalItems === 0 ? 0 : (currentPage - 1) * perPage + 1;
+    const visibleEnd = totalItems === 0 ? 0 : Math.min(currentPage * perPage, totalItems);
+    const pageTokens = buildPageTokens(currentPage, totalPages);
+
+    const handlePageChange = (nextPage: number) => {
+        if (nextPage < 1 || nextPage > totalPages || nextPage === currentPage) {
+            return;
+        }
+
+        onPageChange(nextPage);
+    };
+
+    return (
+        <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-muted-foreground">
+                    Showing {visibleStart}-{visibleEnd} of {totalItems} books
+                </p>
+                <p className="text-sm text-muted-foreground">
+                    Page {currentPage} of {totalPages}
+                    {isFetching ? " (updating...)" : ""}
+                </p>
+            </div>
+
+            {books.length === 0 ? (
+                <Card>
+                    <CardHeader>
+                        <CardTitle>No books found</CardTitle>
+                        <CardDescription>
+                            No results matched "{debouncedSearchQuery}". Try a different keyword.
+                        </CardDescription>
+                    </CardHeader>
+                </Card>
+            ) : (
+                <>
+                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                        {books.map((book) => (
+                            <BookCard key={book.id} book={book} />
+                        ))}
+                    </div>
+
+                    <Pagination>
+                        <PaginationContent>
+                            <PaginationItem>
+                                <PaginationLink
+                                    disabled={!hasPreviousPage}
+                                    onClick={() => handlePageChange(1)}
+                                >
+                                    First
+                                </PaginationLink>
+                            </PaginationItem>
+                            <PaginationItem>
+                                <PaginationPrevious
+                                    disabled={!hasPreviousPage}
+                                    onClick={() => handlePageChange(currentPage - 1)}
+                                />
+                            </PaginationItem>
+
+                            {pageTokens.map((token) => {
+                                if (typeof token !== "number") {
+                                    return (
+                                        <PaginationItem key={token}>
+                                            <PaginationEllipsis />
+                                        </PaginationItem>
+                                    );
+                                }
+
+                                return (
+                                    <PaginationItem key={token}>
+                                        <PaginationLink
+                                            isActive={token === currentPage}
+                                            onClick={() => handlePageChange(token)}
+                                        >
+                                            {token}
+                                        </PaginationLink>
+                                    </PaginationItem>
+                                );
+                            })}
+
+                            <PaginationItem>
+                                <PaginationNext
+                                    disabled={!hasNextPage}
+                                    onClick={() => handlePageChange(currentPage + 1)}
+                                />
+                            </PaginationItem>
+                            <PaginationItem>
+                                <PaginationLink
+                                    disabled={!hasNextPage}
+                                    onClick={() => handlePageChange(totalPages)}
+                                >
+                                    Last
+                                </PaginationLink>
+                            </PaginationItem>
+                        </PaginationContent>
+                    </Pagination>
+                </>
+            )}
+        </>
+    );
+}
+
+function SearchResultsSkeleton() {
+    return (
+        <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <Skeleton className="h-4 w-52" />
+                <Skeleton className="h-4 w-28" />
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {Array.from({ length: 6 }, (_, index) => (
+                    <div key={`search-skeleton-${index}`} className="p-4 border rounded-lg">
+                        <Skeleton className="w-3/4 h-6 mb-3" />
+                        <Skeleton className="w-1/2 h-4" />
+                    </div>
+                ))}
+            </div>
+        </>
     );
 }

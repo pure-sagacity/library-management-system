@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Suspense, useState } from "react";
+import { keepPreviousData, useSuspenseQuery } from "@tanstack/react-query";
 
 import BookCard from "@/components/book-card";
 import { Button } from "@/components/ui/button";
@@ -72,57 +72,9 @@ export default function Catalog() {
     const [page, setPage] = useState<number>(1);
     const [perPage, setPerPage] = useState<number>(20);
 
-    const { data, isError, error, isLoading, isFetching, refetch } = useQuery({
-        queryKey: ["catalog-books", page, perPage],
-        placeholderData: keepPreviousData,
-        queryFn: async () => {
-            const response = await api.books.get({
-                query: {
-                    page,
-                    perPage,
-                },
-            });
-
-            if (response.error) {
-                throw new Error(
-                    getAuthErrorMessage(
-                        response.error.value ?? response.error,
-                        "Failed to load catalog books.",
-                    ),
-                );
-            }
-
-            if (!response.data) {
-                throw new Error("Catalog response was empty.");
-            }
-
-            return response.data;
-        },
-    });
-
-    const books = data?.books ?? [];
-    const metadata = data?.metadata;
-    const totalItems = metadata?.totalItems ?? 0;
-    const currentPage = metadata?.currentPage ?? page;
-    const totalPages = Math.max(metadata?.totalPages ?? 1, 1);
-    const hasPreviousPage = metadata?.hasPreviousPage ?? currentPage > 1;
-    const hasNextPage = metadata?.hasNextPage ?? currentPage < totalPages;
-
-    const visibleStart = totalItems === 0 ? 0 : (currentPage - 1) * perPage + 1;
-    const visibleEnd = totalItems === 0 ? 0 : Math.min(currentPage * perPage, totalItems);
-    const pageTokens = buildPageTokens(currentPage, totalPages);
-
     const handlePerPageChange = (value: number) => {
         setPerPage(value);
         setPage(1);
-    };
-
-    const handlePageChange = (nextPage: number) => {
-        if (nextPage < 1 || nextPage > totalPages || nextPage === currentPage) {
-            return;
-        }
-
-        setPage(nextPage);
     };
 
     return (
@@ -154,46 +106,104 @@ export default function Catalog() {
                 </div>
             </div>
 
+            <Suspense fallback={<CatalogResultsSkeleton />}>
+                <CatalogResults page={page} perPage={perPage} onPageChange={setPage} />
+            </Suspense>
+        </section>
+    );
+}
+
+type CatalogResultsProps = {
+    page: number;
+    perPage: number;
+    onPageChange: (page: number) => void;
+};
+
+function CatalogResults({ page, perPage, onPageChange }: CatalogResultsProps) {
+    const { data: result, isFetching, refetch } = useSuspenseQuery({
+        queryKey: ["catalog-books", page, perPage],
+        placeholderData: keepPreviousData,
+        queryFn: async () => {
+            const response = await api.books.get({
+                query: {
+                    page,
+                    perPage,
+                },
+            });
+
+            if (response.error) {
+                return {
+                    ok: false as const,
+                    message: getAuthErrorMessage(
+                        response.error.value ?? response.error,
+                        "Failed to load catalog books.",
+                    ),
+                };
+            }
+
+            if (!response.data) {
+                return {
+                    ok: false as const,
+                    message: "Catalog response was empty.",
+                };
+            }
+
+            return {
+                ok: true as const,
+                data: response.data,
+            };
+        },
+    });
+
+    if (!result.ok) {
+        return (
+            <Card>
+                <CardHeader>
+                    <CardTitle>Couldn&apos;t load catalog</CardTitle>
+                    <CardDescription>{result.message}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <Button type="button" onClick={() => void refetch()}>
+                        Try Again
+                    </Button>
+                </CardContent>
+            </Card>
+        );
+    }
+
+    const books = result.data.books;
+    const metadata = result.data.metadata;
+    const totalItems = metadata?.totalItems ?? 0;
+    const currentPage = metadata?.currentPage ?? page;
+    const totalPages = Math.max(metadata?.totalPages ?? 1, 1);
+    const hasPreviousPage = metadata?.hasPreviousPage ?? currentPage > 1;
+    const hasNextPage = metadata?.hasNextPage ?? currentPage < totalPages;
+
+    const visibleStart = totalItems === 0 ? 0 : (currentPage - 1) * perPage + 1;
+    const visibleEnd = totalItems === 0 ? 0 : Math.min(currentPage * perPage, totalItems);
+    const pageTokens = buildPageTokens(currentPage, totalPages);
+
+    const handlePageChange = (nextPage: number) => {
+        if (nextPage < 1 || nextPage > totalPages || nextPage === currentPage) {
+            return;
+        }
+
+        onPageChange(nextPage);
+    };
+
+    return (
+        <>
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm text-muted-foreground">
                     Showing {visibleStart}-{visibleEnd} of {totalItems} books
                 </p>
                 <p className="text-sm text-muted-foreground">
                     Page {currentPage} of {totalPages}
-                    {isFetching && !isLoading ? " (updating...)" : ""}
+                    {isFetching ? " (updating...)" : ""}
                 </p>
             </div>
 
-            {isLoading ? (
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                    {Array.from({ length: 6 }, (_, index) => (
-                        <div key={`catalog-skeleton-${index}`} className="p-4 border rounded-lg">
-                            <Skeleton className="w-3/4 h-6 mb-3" />
-                            <Skeleton className="w-1/2 h-4" />
-                        </div>
-                    ))}
-                </div>
-            ) : null}
-
-            {isError ? (
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Couldn&apos;t load catalog</CardTitle>
-                        <CardDescription>
-                            {error instanceof Error
-                                ? error.message
-                                : "Something went wrong while loading books."}
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <Button type="button" onClick={() => void refetch()}>
-                            Try Again
-                        </Button>
-                    </CardContent>
-                </Card>
-            ) : null}
-
-            {!isLoading && !isError && books.length === 0 ? (
+            {books.length === 0 ? (
                 <Card>
                     <CardHeader>
                         <CardTitle>No books found</CardTitle>
@@ -202,9 +212,7 @@ export default function Catalog() {
                         </CardDescription>
                     </CardHeader>
                 </Card>
-            ) : null}
-
-            {!isLoading && !isError && books.length > 0 ? (
+            ) : (
                 <>
                     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                         {books.map((book) => (
@@ -267,7 +275,27 @@ export default function Catalog() {
                         </PaginationContent>
                     </Pagination>
                 </>
-            ) : null}
-        </section>
+            )}
+        </>
+    );
+}
+
+function CatalogResultsSkeleton() {
+    return (
+        <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <Skeleton className="h-4 w-52" />
+                <Skeleton className="h-4 w-28" />
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {Array.from({ length: 6 }, (_, index) => (
+                    <div key={`catalog-skeleton-${index}`} className="p-4 border rounded-lg">
+                        <Skeleton className="w-3/4 h-6 mb-3" />
+                        <Skeleton className="w-1/2 h-4" />
+                    </div>
+                ))}
+            </div>
+        </>
     );
 }
