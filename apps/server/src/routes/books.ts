@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import { book as bookTable, loan } from '@/lib/db/schema';
 import { and, eq, ne, sql } from 'drizzle-orm';
 import { buildRequestLogger, getOrCreateRequestId, toErrorDetails } from '@/lib/logger';
+import { getBookSummary } from '../../functions/getSummary';
 
 const BookSchema = z.object({
     id: z.string(),
@@ -21,6 +22,11 @@ const UpdateBookBodySchema = z.object({
     publication_year: z.number().int().min(0).max(new Date().getFullYear()).optional(),
 }).refine((payload) => payload.title !== undefined || payload.genre !== undefined || payload.publication_year !== undefined, {
     message: "At least one field is required to update a book.",
+});
+
+const BookSummarySchema = z.object({
+    source: z.string().nullable(),
+    summary: z.string().nullable(),
 });
 
 const books = new Elysia({ prefix: "/books" })
@@ -182,6 +188,143 @@ const books = new Elysia({ prefix: "/books" })
             page: z.coerce.number().int().min(1).default(1),
             perPage: z.coerce.number().int().min(1).default(20),
         })
+    })
+    .get("/:id", async ({ params, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
+        const book_id = params.id;
+
+        requestLogger.debug(
+            {
+                book_id,
+            },
+            'books.get_by_id.start',
+        );
+
+        try {
+            const book = await db
+                .select({
+                    id: bookTable.id,
+                    title: bookTable.title,
+                    genre: bookTable.genre,
+                    publication_year: bookTable.publication_year,
+                    created_at: bookTable.created_at,
+                })
+                .from(bookTable)
+                .where(eq(bookTable.id, book_id))
+                .limit(1);
+
+            if (book.length === 0) {
+                set.status = 404;
+                requestLogger.warn(
+                    {
+                        book_id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'books.get_by_id.not_found',
+                );
+                return null;
+            }
+
+            requestLogger.info(
+                {
+                    book_id,
+                    durationMs: Date.now() - startedAt,
+                },
+                'books.get_by_id.success',
+            );
+
+            return book[0];
+        } catch (error) {
+            set.status = 500;
+            requestLogger.error(
+                {
+                    book_id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'books.get_by_id.error',
+            );
+            return null;
+        }
+    }, {
+        params: z.object({
+            id: z.string(),
+        }),
+        response: z.nullable(BookSchema),
+    })
+    .get("/:id/summary", async ({ params, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
+        const book_id = params.id;
+
+        requestLogger.debug(
+            {
+                book_id,
+            },
+            'books.get_summary.start',
+        );
+
+        try {
+            const book = await db
+                .select({
+                    id: bookTable.id,
+                    title: bookTable.title,
+                })
+                .from(bookTable)
+                .where(eq(bookTable.id, book_id))
+                .limit(1);
+
+            if (book.length === 0) {
+                set.status = 404;
+                requestLogger.warn(
+                    {
+                        book_id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'books.get_summary.not_found',
+                );
+                return {
+                    source: null,
+                    summary: null,
+                };
+            }
+
+            const result = await getBookSummary(book[0].title);
+
+            requestLogger.info(
+                {
+                    book_id,
+                    source: result.source,
+                    hasSummary: result.summary !== null,
+                    durationMs: Date.now() - startedAt,
+                },
+                'books.get_summary.success',
+            );
+
+            return result;
+        } catch (error) {
+            set.status = 500;
+            requestLogger.error(
+                {
+                    book_id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'books.get_summary.error',
+            );
+            return {
+                source: null,
+                summary: null,
+            };
+        }
+    }, {
+        params: z.object({
+            id: z.string(),
+        }),
+        response: BookSummarySchema,
     })
     .use(protectRoute)
     .use(requireAdmin)

@@ -168,7 +168,7 @@ export default function Catalog() {
     };
 
     return (
-        <section className="flex flex-col gap-6">
+        <section className="flex flex-col min-h-screen gap-6">
             <div className="space-y-1">
                 <h2 className="text-2xl font-bold tracking-tight">Catalog</h2>
                 <p className="text-muted-foreground">
@@ -240,9 +240,9 @@ export default function Catalog() {
             {isLoading ? (
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     {Array.from({ length: 6 }, (_, index) => (
-                        <div key={`catalog-skeleton-${index}`} className="rounded-lg border p-4">
-                            <Skeleton className="mb-3 h-6 w-3/4" />
-                            <Skeleton className="h-4 w-1/2" />
+                        <div key={`catalog-skeleton-${index}`} className="p-4 border rounded-lg">
+                            <Skeleton className="w-3/4 h-6 mb-3" />
+                            <Skeleton className="w-1/2 h-4" />
                         </div>
                     ))}
                 </div>
