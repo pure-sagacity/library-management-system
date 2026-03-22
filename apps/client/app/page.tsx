@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, LogIn } from "lucide-react";
+import { BookOpen, LayoutDashboard, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -12,8 +12,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import SplashScreen from "@/components/splash-screen";
+import { authClient } from "@/lib/auth-client";
 
 export default function Home() {
+  const { data: session } = authClient.useSession();
+
   return (
     <main className="px-6 py-12 min-h-svh bg-muted/40 md:px-10">
       <SplashScreen />
@@ -53,7 +56,7 @@ export default function Home() {
             </CardFooter>
           </Card>
 
-          <Card>
+          {!session ? (<Card>
             <CardHeader>
               <div className="flex items-center justify-center mb-2 rounded-lg size-9 bg-primary/10 text-primary">
                 <LogIn className="size-4" />
@@ -74,7 +77,30 @@ export default function Home() {
                 <Link href="/login">Go to Login</Link>
               </Button>
             </CardFooter>
-          </Card>
+          </Card>) : (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-center mb-2 rounded-lg size-9 bg-primary/10 text-primary">
+                  <LayoutDashboard className="size-4" />
+                </div>
+                <CardTitle>Dashboard</CardTitle>
+                <CardDescription>
+                  Open your workspace to manage loans, review activity, and
+                  monitor library operations.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  Pick up where you left off with quick access to your tools.
+                </p>
+              </CardContent>
+              <CardFooter>
+                <Button asChild className="w-full" variant="outline" size="lg">
+                  <Link href="/dashboard">Go to Dashboard</Link>
+                </Button>
+              </CardFooter>
+            </Card>
+          )}
         </section>
       </div>
     </main>

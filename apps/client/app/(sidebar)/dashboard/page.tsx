@@ -47,7 +47,6 @@ export default function LibraryDashboard() {
           <div className="col-span-2">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-stone-900">Current Loans</h2>
-              <span className="text-xs text-stone-500">Sorted by due date</span>
             </div>
             <div className="flex flex-col gap-3">
               <Suspense fallback={<CurrentLoans.Skeleton />}>
