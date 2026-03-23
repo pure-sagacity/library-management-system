@@ -31,6 +31,8 @@ import {
 } from "@/components/ui/sidebar"
 import { StripEmptyObjects } from "better-auth"
 import { useRouter } from "next/navigation";
+import { authClient } from "@/lib/auth-client";
+import { toast } from "sonner";
 
 type Session = {
     user: {
@@ -62,6 +64,17 @@ export function NavUser({
 }) {
     const { isMobile } = useSidebar();
     const router = useRouter();
+
+    async function handleLogout() {
+        toast.promise(authClient.signOut(), {
+            loading: "Logging out...",
+            success: () => {
+                router.push("/login");
+                return "Logged out successfully";
+            },
+            error: "Failed to log out. Please try again.",
+        })
+    }
 
     return (
         <SidebarMenu>
@@ -113,7 +126,7 @@ export function NavUser({
                             </DropdownMenuItem>
                         </DropdownMenuGroup>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem>
+                        <DropdownMenuItem onClick={handleLogout}>
                             <LogOut />
                             Log out
                         </DropdownMenuItem>

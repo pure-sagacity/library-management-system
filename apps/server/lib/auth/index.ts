@@ -1,9 +1,9 @@
-import { betterAuth } from "better-auth";
+import { account, session, user, verification, passkey as passkeyTable } from "../db/schema";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@/lib/db"; // your drizzle instance
-import { admin } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
-import { account, session, user, verification } from "../db/schema";
+import { betterAuth, url } from "better-auth";
+import { admin } from "better-auth/plugins";
 import { logger } from "@/lib/logger";
 
 const trustedOrigins = [
@@ -31,14 +31,24 @@ export const auth = betterAuth({
             user,
             verification,
             account,
-            session
+            session,
+            passkey: passkeyTable
         }
     }),
     emailAndPassword: {
         enabled: true,
+        requireEmailVerification: false,
     },
     plugins: [
-        passkey(),
+        passkey({
+            rpID: process.env.BETTER_AUTH_SITE_URL || "localhost",           // your domain in prod, e.g. "yourdomain.com"
+            rpName: "The Archive",
+            authenticatorSelection: {
+                authenticatorAttachment: "platform",
+                requireResidentKey: true,
+                userVerification: "required",
+            }
+        }),
         admin()
     ],
     basePath: '/api'

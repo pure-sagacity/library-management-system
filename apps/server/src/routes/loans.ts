@@ -4,10 +4,11 @@ import { Elysia } from 'elysia'
 import z from "zod";
 import { protectRoute, requireAdmin } from '@/middleware/protect';
 import { db } from '@/lib/db';
-import { book as bookTable, loan } from '@/lib/db/schema';
+import { book as bookTable, loan, user } from '@/lib/db/schema';
 import { and, asc, count, eq, inArray } from 'drizzle-orm';
 import { buildRequestLogger, getOrCreateRequestId, toErrorDetails } from '@/lib/logger';
 import { cleanupOrphanLoans } from '@/lib/db/queries/orphan-loans';
+import { id } from 'zod/v4/locales';
 
 const LoanStatusSchema = z.enum(["active", "returned", "overdue"]);
 
@@ -354,6 +355,150 @@ const loans = new Elysia({ prefix: '/loans' })
             LoanAccessDeniedSchema,
         ]),
     })
+    .get("/:id", async ({ params, session, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
+        const loan_id = params.id;
+
+        requestLogger.debug(
+            {
+                loan_id,
+                requesterUserId: session.user.id,
+            },
+            'loans.getById.start',
+        );
+
+        try {
+            const loanData = await db
+                .select({
+                    loan_id: loan.id,
+                    book_id: loan.book_id,
+                    user_id: loan.user_id,
+                    checkout_date: loan.checkout_date,
+                    due_date: loan.due_date,
+                    status: loan.status,
+                    returned_at: loan.returned_at,
+                    // Book details
+                    book_title: bookTable.title,
+                    book_genre: bookTable.genre,
+                    book_publication_year: bookTable.publication_year,
+                    // Borrower info
+                    borrower_name: user.name,
+                    borrower_email: user.email,
+                })
+                .from(loan)
+                .innerJoin(bookTable, eq(loan.book_id, bookTable.id))
+                .innerJoin(user, eq(loan.user_id, user.id))
+                .where(eq(loan.id, loan_id))
+                .limit(1);
+
+            if (loanData.length === 0) {
+                set.status = 404;
+                requestLogger.warn(
+                    {
+                        loan_id,
+                        requesterUserId: session.user.id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'loans.getById.not_found',
+                );
+                return {
+                    ok: false,
+                    message: `Loan with ID ${loan_id} was not found.`,
+                };
+            }
+
+            const loanRecord = loanData[0];
+
+            requestLogger.info(
+                {
+                    loan_id,
+                    book_id: loanRecord.book_id,
+                    user_id: loanRecord.user_id,
+                    requesterUserId: session.user.id,
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.getById.success',
+            );
+
+            return {
+                ok: true,
+                data: {
+                    loan: {
+                        id: loanRecord.loan_id,
+                        book_id: loanRecord.book_id,
+                        user_id: loanRecord.user_id,
+                        checkout_date: loanRecord.checkout_date,
+                        due_date: loanRecord.due_date,
+                        status: loanRecord.status,
+                        returned_at: loanRecord.returned_at,
+                    },
+                    book: {
+                        id: loanRecord.book_id,
+                        title: loanRecord.book_title,
+                        genre: loanRecord.book_genre,
+                        publication_year: loanRecord.book_publication_year,
+                    },
+                    borrower: {
+                        id: loanRecord.user_id,
+                        name: loanRecord.borrower_name,
+                        email: loanRecord.borrower_email,
+                    },
+                },
+            };
+        } catch (error) {
+            set.status = 500;
+            requestLogger.error(
+                {
+                    loan_id,
+                    requesterUserId: session.user.id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'loans.getById.error',
+            );
+            return {
+                ok: false,
+                message: 'Failed to fetch loan details due to an unexpected error.',
+            };
+        }
+    }, {
+        params: z.object({
+            id: z.string(),
+        }),
+        response: z.union([
+            z.object({
+                ok: z.literal(true),
+                data: z.object({
+                    loan: z.object({
+                        id: z.string(),
+                        book_id: z.string(),
+                        user_id: z.string(),
+                        checkout_date: z.date(),
+                        due_date: z.date(),
+                        status: LoanStatusSchema,
+                        returned_at: z.date().nullable(),
+                    }),
+                    book: z.object({
+                        id: z.string(),
+                        title: z.string(),
+                        genre: z.enum(["Fiction", "Non-Fiction", "Science Fiction", "Fantasy", "Biography", "History", "Children's"]),
+                        publication_year: z.number(),
+                    }),
+                    borrower: z.object({
+                        id: z.string(),
+                        name: z.string(),
+                        email: z.string(),
+                    }),
+                }),
+            }),
+            z.object({
+                ok: z.literal(false),
+                message: z.string(),
+            }),
+        ])
+    })
     .post("/:id/borrow", async ({ params, session, set, request }) => {
         const startedAt = Date.now();
         const requestId = getOrCreateRequestId(request);
@@ -410,13 +555,13 @@ const loans = new Elysia({ prefix: '/loans' })
             const checkoutAt = new Date();
             const dueAt = new Date(checkoutAt.getTime() + TIME_LENGTH_DUE_DATE);
 
-            await db.insert(loan).values({
+            const newLoanId = await db.insert(loan).values({
                 book_id,
                 user_id: session.user.id,
                 checkout_date: checkoutAt,
                 status: "active",
                 due_date: dueAt,
-            });
+            }).returning({ id: loan.id });
 
             requestLogger.info(
                 {
@@ -428,7 +573,7 @@ const loans = new Elysia({ prefix: '/loans' })
                 },
                 'loans.borrow.success',
             );
-            return { message: `Book with ID ${book_id} has been borrowed successfully.`, ok: true };
+            return { message: `Book with ID ${book_id} has been borrowed successfully.`, id: newLoanId[0].id, ok: true };
         } catch (error) {
             set.status = 500;
             requestLogger.error(
@@ -446,10 +591,17 @@ const loans = new Elysia({ prefix: '/loans' })
         params: z.object({
             id: z.string(),
         }),
-        response: z.object({
-            ok: z.boolean(),
-            message: z.string(),
-        })
+        response: z.union([
+            z.object({
+                ok: z.literal(true),
+                id: z.string(),
+                message: z.string(),
+            }),
+            z.object({
+                ok: z.literal(false),
+                message: z.string(),
+            }),
+        ])
     })
     .post("/:id/renew", async ({ params, session, set, request }) => {
         const startedAt = Date.now();

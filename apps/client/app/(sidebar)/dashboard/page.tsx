@@ -226,6 +226,8 @@ function ActiveLoansStat() {
 }
 
 function CurrentLoans() {
+  const router = useRouter();
+
   const { data: sessionState } = useDashboardSession();
   const user = sessionState.user;
 
@@ -318,14 +320,15 @@ function CurrentLoans() {
         <span className={`${badge.bg} ${badge.text} inline-flex items-center self-center text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap`}>
           {badge.label}
         </span>
-        <div className="flex gap-2">
-          <button onClick={() => renewBook(loan.loan_id)} className="flex items-center gap-1 rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition-colors hover:bg-amber-50">
-            <RotateCcw size={12} /> Renew
-          </button>
-          <button className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-400 transition-colors hover:bg-stone-50">
-            Return
-          </button>
-        </div>
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          transition={{ duration: 0.15, ease: "easeOut" }}
+          onClick={() => router.push(`/loan/${loan.loan_id}`)}
+          className="px-3 py-1 text-xs font-medium rounded bg-stone-100 text-stone-800"
+        >
+          View
+        </motion.button>
       </motion.div>
     );
   });

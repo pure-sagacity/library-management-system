@@ -14,6 +14,7 @@ import {
   FieldDescription,
   FieldGroup,
   FieldLabel,
+  FieldSeparator
 } from "@/components/ui/field"
 import { Spinner } from "./ui/spinner";
 import { Input } from "@/components/ui/input"
@@ -23,6 +24,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { getAuthErrorMessage } from "@/lib/api";
+import { Key } from "lucide-react";
 
 export function LoginForm({
   className,
@@ -30,14 +32,15 @@ export function LoginForm({
 }: React.ComponentProps<"div">) {
   const [email, setEmail] = useState<string>("");
   const [password, setPassword] = useState<string>("");
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [emailLoading, setEmailLoading] = useState<boolean>(false);
+  const [passkeyLoading, setPasskeyLoading] = useState<boolean>(false);
 
   const router = useRouter();
 
 
   async function handleSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault()
-    setIsLoading(true);
+    setEmailLoading(true);
 
     try {
       const response = await authClient.signIn.email({
@@ -62,7 +65,34 @@ export function LoginForm({
       toast.error(message);
       console.error("Login error:", { message });
     } finally {
-      setIsLoading(false);
+      setEmailLoading(false);
+    }
+  }
+
+  async function handlePasskey() {
+    setPasskeyLoading(true);
+
+    try {
+      const response = await authClient.signIn.passkey();
+
+      if (response.error) {
+        const message = getAuthErrorMessage(response.error, "Passkey login failed. Please try again.");
+        toast.error(message);
+        console.error("Passkey login error:", {
+          status: response.error.status,
+          statusText: response.error.statusText,
+          message,
+        });
+        return;
+      }
+
+      router.push("/dashboard");
+    } catch (error) {
+      const message = getAuthErrorMessage(error, "Passkey login failed. Please try again.");
+      toast.error(message);
+      console.error("Passkey login error:", { message });
+    } finally {
+      setPasskeyLoading(false);
     }
   }
 
@@ -72,10 +102,21 @@ export function LoginForm({
         <CardHeader className="text-center">
           <CardTitle className="text-xl">Welcome back</CardTitle>
           <CardDescription>
-            Login into your library account
+            Login with your Apple or Google account
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <FieldGroup>
+            <Field>
+              <Button variant="outline" type="button" onClick={handlePasskey} disabled={emailLoading} className="w-full">
+                <Key size={16} className="mr-2" />
+                {passkeyLoading ? <Spinner /> : "Continue with Passkey"}
+              </Button>
+            </Field>
+            <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
+              Or continue with
+            </FieldSeparator>
+          </FieldGroup>
           <form onSubmit={handleSubmit}>
             <FieldGroup>
               <Field>
@@ -110,8 +151,8 @@ export function LoginForm({
                 />
               </Field>
               <Field>
-                <Button type="submit" disabled={isLoading}>
-                  {isLoading ? <Spinner /> : "Login"}
+                <Button type="submit" disabled={emailLoading}>
+                  {emailLoading ? <Spinner /> : "Login"}
                 </Button>
                 <FieldDescription className="text-center">
                   Don&apos;t have an account? <Link href="/signup">Sign up</Link>

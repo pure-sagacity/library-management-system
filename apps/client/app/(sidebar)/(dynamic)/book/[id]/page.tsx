@@ -1,14 +1,17 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { BookOpen, Calendar, Hash, Pencil, Tag } from "lucide-react";
-import { useParams } from "next/navigation";
+import { ArrowRight, BookOpen, Calendar, Hash, Pencil, Tag } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, getAuthErrorMessage } from "@/lib/api";
+import { authClient } from "@/lib/auth-client";
+import { toast } from "sonner";
+import { Spinner } from "@/components/ui/spinner";
 
 const containerVariants = {
     hidden: { opacity: 0 },
@@ -211,6 +214,24 @@ function SummarySection({ id }: { id: string }) {
 }
 
 function LoanDetailsSection({ id }: { id: string }) {
+    const router = useRouter();
+    const [loading, setLoading] = useState(false);
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+    useEffect(() => {
+        const getCurrentUser = async () => {
+            try {
+                const session = await authClient.getSession();
+                setCurrentUserId(session?.data?.user?.id ?? null);
+            } catch (error) {
+                console.error("Failed to get current user session", error);
+                setCurrentUserId(null);
+            }
+        };
+
+        getCurrentUser();
+    }, []);
+
     const { data: result } = useSuspenseQuery({
         queryKey: ["book-loans", id],
         queryFn: async () => {
@@ -233,6 +254,32 @@ function LoanDetailsSection({ id }: { id: string }) {
         },
     });
 
+    function loanBook(book_id: string) {
+        setLoading(true);
+        toast.promise(
+            api.loans({ id }).borrow.post({ params: { book_id } }),
+            {
+                loading: "Processing loan...",
+                success: (data) => {
+                    switch (data.data?.ok) {
+                        case true: {
+                            router.push(`/loan/${data.data.id}`);
+                            return data.data.message;
+                        }
+                        case false: {
+                            return data.data.message;
+                        }
+                    }
+                },
+                error: (err) => getAuthErrorMessage(
+                    err.value ?? err,
+                    "Failed to loan this book.",
+                ),
+                finally: () => setLoading(false)
+            }
+        )
+    }
+
     if (!result.ok) {
         return (
             <motion.div className="p-6 border border-gray-200 rounded-2xl" variants={itemVariants}>
@@ -245,6 +292,7 @@ function LoanDetailsSection({ id }: { id: string }) {
     }
 
     const activeLoan = result.loans.find((entry) => entry.status === "active");
+    const isCurrentUsersActiveLoan = activeLoan?.user_id === currentUserId;
 
     return (
         <motion.div className="p-6 border border-gray-200 rounded-2xl" variants={itemVariants}>
@@ -271,16 +319,19 @@ function LoanDetailsSection({ id }: { id: string }) {
                 </div>
             </div>
 
-            <Button type="button" className="w-full mt-5 font-sans">
-                Loan (Coming Soon)
-            </Button>
+            <div className="flex flex-row justify-between gap-4">
+                <Button size="lg" type="button" disabled={loading || Boolean(activeLoan)} onClick={() => loanBook(id)} className="mt-5 font-sans hover:bg-orange-600 transition-colors duration-250 hover:cursor-pointer">
+                    {loading ? <Spinner /> : activeLoan ? isCurrentUsersActiveLoan ? "You Borrowed This Book" : "Currently Unavailable" : "Borrow this Book"}
+                </Button>
 
-            <Link
-                href={`/book/${id}/history`}
-                className="inline-flex mt-4 font-sans text-sm font-medium text-orange-600 transition-colors hover:text-orange-700"
-            >
-                View more
-            </Link>
+                <Link
+                    href={`/book/${id}/history`}
+                    className="flex w-full mt-4 font-sans items-center gap-1 justify-end text-sm font-medium text-orange-600 transition-colors hover:text-orange-700"
+                >
+                    View History
+                    <ArrowRight size={14} aria-hidden="true" />
+                </Link>
+            </div>
         </motion.div>
     );
 }

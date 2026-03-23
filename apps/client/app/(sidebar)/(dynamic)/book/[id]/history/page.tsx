@@ -202,9 +202,9 @@ function BookHistoryList({ id }: { id: string }) {
                             }`}>
                             {entry.status}
                         </span>
-                        <span className="font-sans text-xs text-gray-500">
-                            Loan ID: {entry.id}
-                        </span>
+                        <Link href={`/loan/${entry.id}`} className="text-sm font-medium text-orange-600 transition-colors hover:text-orange-800">
+                            Loan details <ArrowLeft size={14} className="rotate-180 inline" />
+                        </Link>
                     </div>
 
                     <div className="grid grid-cols-1 gap-3 mt-4 font-sans text-sm text-gray-700 sm:grid-cols-2">
@@ -220,9 +220,14 @@ function BookHistoryList({ id }: { id: string }) {
                             <Clock3 size={14} className="text-orange-500" />
                             Returned: {formatDate(entry.returned_at)}
                         </div>
-                        <div className="flex items-center gap-2 sm:col-span-2">
-                            <UserRound size={14} className="text-orange-500" />
-                            User ID: {entry.user_id}
+                        <div className="flex items-center justify-between gap-3 sm:col-span-2">
+                            <span className="flex items-center gap-2">
+                                <UserRound size={14} className="text-orange-500" />
+                                User ID: {entry.user_id}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                                Loan ID: {entry.id}
+                            </span>
                         </div>
                     </div>
                 </motion.li>
