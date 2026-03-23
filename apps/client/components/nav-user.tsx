@@ -4,11 +4,9 @@ const DEFAULT_USER_IMAGE = "https://upload.wikimedia.org/wikipedia/commons/0/03/
 
 import {
     BadgeCheck,
-    Bell,
     ChevronsUpDown,
-    CreditCard,
+    Cog,
     LogOut,
-    Sparkles,
 } from "lucide-react"
 
 import {
@@ -32,6 +30,7 @@ import {
     useSidebar,
 } from "@/components/ui/sidebar"
 import { StripEmptyObjects } from "better-auth"
+import { useRouter } from "next/navigation";
 
 type Session = {
     user: {
@@ -61,7 +60,8 @@ export function NavUser({
 }: {
     user: User
 }) {
-    const { isMobile } = useSidebar()
+    const { isMobile } = useSidebar();
+    const router = useRouter();
 
     return (
         <SidebarMenu>
@@ -103,9 +103,13 @@ export function NavUser({
                         </DropdownMenuLabel>
                         <DropdownMenuSeparator />
                         <DropdownMenuGroup>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => router.push("/account")}>
                                 <BadgeCheck />
                                 Account
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => router.push("/settings")}>
+                                <Cog />
+                                Settings
                             </DropdownMenuItem>
                         </DropdownMenuGroup>
                         <DropdownMenuSeparator />

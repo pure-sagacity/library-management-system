@@ -24,15 +24,35 @@ import { authClient } from "@/lib/auth-client"
 import { NavUser } from "./nav-user"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { api } from "@/lib/api"
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
-  const { data: session } = useSidebarSession();
 
-  // For demonstration purposes, we're hardcoding the user role here.
-  // In a real application, you would determine this based on the authenticated user's session data.
-  const userRole: "user" | "admin" = "admin";
-  const isAdmin = userRole.toLowerCase() === "admin";
+  const { data: isAdmin } = useSuspenseQuery({
+    queryKey: ["sidebar-is-admin"],
+    queryFn: async () => {
+      try {
+        const session = await authClient.getSession();
+        if (!session?.data?.user?.id) {
+          return false;
+        }
+
+        const response = await api.user({ id: session.data.user.id }).isAdmin.get();
+
+        if (response.error) {
+          console.error("Failed to check admin status", response.error);
+          return false;
+        }
+
+        const data = response.data;
+        return data.isAdmin ?? false;
+      } catch (error) {
+        console.error("Error checking admin status", error);
+        return false;
+      }
+    },
+  });
 
   return (
     <Sidebar {...props}>
@@ -49,7 +69,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   <Suspense fallback={<SidebarEmailSkeleton />}>
                     <SidebarUserEmail />
                   </Suspense>
-                  {isAdmin ? <AdminModeBadge /> : null}
                 </div>
               </Link>
             </SidebarMenuButton>
