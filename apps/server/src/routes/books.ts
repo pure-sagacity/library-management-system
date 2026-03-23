@@ -39,6 +39,25 @@ const BookLoanHistorySchema = z.object({
     status: z.enum(["active", "returned", "overdue"]),
 });
 
+const BookGenreSchema = z.enum([
+    "Fiction",
+    "Non-Fiction",
+    "Science Fiction",
+    "Fantasy",
+    "Biography",
+    "History",
+    "Children's",
+]);
+
+const BookListQuerySchema = z.object({
+    q: z.string().trim().optional(),
+    genre: BookGenreSchema.optional(),
+    publicationYear: z.coerce.number().int().min(0).max(new Date().getFullYear()).optional(),
+    sort: z.enum(["created_desc", "title_asc"]).default("created_desc"),
+    page: z.coerce.number().int().min(1).default(1),
+    perPage: z.coerce.number().int().min(1).default(20),
+});
+
 const books = new Elysia({ prefix: "/books" })
     .get("/", async ({ query, request }) => {
         const startedAt = Date.now();
@@ -46,17 +65,41 @@ const books = new Elysia({ prefix: "/books" })
         const requestLogger = buildRequestLogger(request, requestId);
         const page = query.page;
         const perPage = Math.min(query.perPage, 100);
+        const q = query.q?.trim() || undefined;
+        const genre = query.genre;
+        const publicationYear = query.publicationYear;
+        const sort = query.sort;
 
         requestLogger.debug(
             {
                 page,
                 perPage,
+                queryLength: q?.length ?? 0,
+                genre,
+                publicationYear,
+                sort,
             },
             'books.list.start',
         );
 
         try {
-            const { books, totalItems } = await getPaginatedBooks({ page, perPage });
+            const { books, totalItems } = await getPaginatedBooks({ page, perPage, q });
+            const filteredBooks = books.filter((entry) => {
+                if (genre && entry.genre !== genre) {
+                    return false;
+                }
+
+                if (publicationYear !== undefined && entry.publication_year !== publicationYear) {
+                    return false;
+                }
+
+                return true;
+            });
+
+            if (sort === "title_asc") {
+                filteredBooks.sort((a, b) => a.title.localeCompare(b.title));
+            }
+
             const totalPages = totalItems === 0 ? 0 : Math.ceil(totalItems / perPage);
             const hasNextPage = page < totalPages;
             const hasPreviousPage = page > 1 && totalPages > 0;
@@ -67,14 +110,14 @@ const books = new Elysia({ prefix: "/books" })
                     perPage,
                     totalItems,
                     totalPages,
-                    returnedCount: books.length,
+                    returnedCount: filteredBooks.length,
                     durationMs: Date.now() - startedAt,
                 },
                 'books.list.success',
             );
 
             return {
-                books,
+                books: filteredBooks,
                 metadata: {
                     hasNextPage,
                     hasPreviousPage,
@@ -91,6 +134,10 @@ const books = new Elysia({ prefix: "/books" })
                 {
                     page,
                     perPage,
+                    queryLength: q?.length ?? 0,
+                    genre,
+                    publicationYear,
+                    sort,
                     durationMs: Date.now() - startedAt,
                     error: toErrorDetails(error),
                 },
@@ -112,10 +159,7 @@ const books = new Elysia({ prefix: "/books" })
                 perPage: z.number(),
             })
         }),
-        query: z.object({
-            page: z.coerce.number().int().min(1).default(1),
-            perPage: z.coerce.number().int().min(1).default(20),
-        })
+        query: BookListQuerySchema,
     })
     .get("/search", async ({ query, request }) => {
         const startedAt = Date.now();
@@ -802,6 +846,93 @@ const books = new Elysia({ prefix: "/books" })
             ok: z.boolean(),
             message: z.string(),
         })
+    })
+    .delete("/:id/purge", async ({ params, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
+        const book_id = params.id;
+
+        requestLogger.debug(
+            {
+                book_id,
+            },
+            'books.purge.start',
+        );
+
+        try {
+            const existingBook = await db
+                .select({
+                    id: bookTable.id,
+                    title: bookTable.title,
+                })
+                .from(bookTable)
+                .where(eq(bookTable.id, book_id))
+                .limit(1);
+
+            if (existingBook.length === 0) {
+                set.status = 404;
+                requestLogger.warn(
+                    {
+                        book_id,
+                        durationMs: Date.now() - startedAt,
+                    },
+                    'books.purge.not_found',
+                );
+                return {
+                    ok: false,
+                    message: `Book with ID ${book_id} was not found.`,
+                    deletedLoans: 0,
+                };
+            }
+
+            const deletedLoanRows = await db
+                .delete(loan)
+                .where(eq(loan.book_id, book_id))
+                .returning({ id: loan.id });
+
+            await db.delete(bookTable).where(eq(bookTable.id, book_id));
+
+            requestLogger.info(
+                {
+                    book_id,
+                    title: existingBook[0].title,
+                    deletedLoans: deletedLoanRows.length,
+                    durationMs: Date.now() - startedAt,
+                },
+                'books.purge.success',
+            );
+
+            return {
+                ok: true,
+                message: `Book \"${existingBook[0].title}\" and ${deletedLoanRows.length} related loan records were deleted successfully.`,
+                deletedLoans: deletedLoanRows.length,
+            };
+        } catch (error) {
+            set.status = 500;
+            requestLogger.error(
+                {
+                    book_id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'books.purge.error',
+            );
+            return {
+                ok: false,
+                message: 'Failed to purge the book due to an unexpected error.',
+                deletedLoans: 0,
+            };
+        }
+    }, {
+        params: z.object({
+            id: z.string(),
+        }),
+        response: z.object({
+            ok: z.boolean(),
+            message: z.string(),
+            deletedLoans: z.number().int().min(0),
+        }),
     });
 
 export { books };
