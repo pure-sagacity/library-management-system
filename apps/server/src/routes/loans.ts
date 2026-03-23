@@ -5,7 +5,7 @@ import z from "zod";
 import { protectRoute, requireAdmin } from '@/middleware/protect';
 import { db } from '@/lib/db';
 import { book as bookTable, loan, user } from '@/lib/db/schema';
-import { and, asc, count, eq, inArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
 import { buildRequestLogger, getOrCreateRequestId, toErrorDetails } from '@/lib/logger';
 import { cleanupOrphanLoans } from '@/lib/db/queries/orphan-loans';
 import { id } from 'zod/v4/locales';
@@ -21,6 +21,18 @@ const CurrentLoanSchema = z.object({
     checkout_date: z.date(),
     due_date: z.date(),
     status: LoanStatusSchema,
+});
+
+const PaginatedLoanHistorySchema = z.object({
+    ok: z.literal(true),
+    user_id: z.string(),
+    loans: z.array(CurrentLoanSchema),
+    pagination: z.object({
+        page: z.number(),
+        limit: z.number(),
+        total: z.number(),
+        totalPages: z.number(),
+    }),
 });
 
 const LoanAccessDeniedSchema = z.object({
@@ -352,6 +364,133 @@ const loans = new Elysia({ prefix: '/loans' })
                 user_id: z.string(),
                 loans: z.array(CurrentLoanSchema),
             }),
+            LoanAccessDeniedSchema,
+        ]),
+    })
+    .get("/users/:user_id/history", async ({ params, query, session, set, request }) => {
+        const startedAt = Date.now();
+        const requestId = getOrCreateRequestId(request);
+        const requestLogger = buildRequestLogger(request, requestId);
+        const user_id = params.user_id;
+
+        requestLogger.debug(
+            {
+                user_id,
+                requesterUserId: session.user.id,
+                requesterRole: session.user.role ?? null,
+                page: query.page,
+                limit: query.limit,
+            },
+            'loans.history.start',
+        );
+
+        const canAccessUserData = session.user.id === user_id || session.user.role === "admin";
+
+        if (!canAccessUserData) {
+            set.status = 403;
+            requestLogger.warn(
+                {
+                    user_id,
+                    requesterUserId: session.user.id,
+                    requesterRole: session.user.role ?? null,
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.history.forbidden',
+            );
+            return {
+                ok: false,
+                message: 'You are not authorized to access this user data.',
+            };
+        }
+
+        const page = Math.max(1, query.page ?? 1);
+        const limit = Math.min(50, Math.max(1, query.limit ?? 10));
+        const offset = (page - 1) * limit;
+
+        try {
+            const orphanLoansDeleted = await runOrphanCleanupForRead({
+                requestLogger,
+                route: 'loans.history',
+            });
+
+            const [totalResult] = await db
+                .select({ total: count(loan.id) })
+                .from(loan)
+                .where(eq(loan.user_id, user_id));
+
+            const total = totalResult?.total ?? 0;
+            const totalPages = total === 0 ? 1 : Math.ceil(total / limit);
+
+            const historyLoans = await db
+                .select({
+                    loan_id: loan.id,
+                    book_id: loan.book_id,
+                    title: bookTable.title,
+                    genre: bookTable.genre,
+                    publication_year: bookTable.publication_year,
+                    checkout_date: loan.checkout_date,
+                    due_date: loan.due_date,
+                    status: loan.status,
+                })
+                .from(loan)
+                .innerJoin(bookTable, eq(loan.book_id, bookTable.id))
+                .where(eq(loan.user_id, user_id))
+                .orderBy(desc(loan.checkout_date), desc(loan.id))
+                .limit(limit)
+                .offset(offset);
+
+            requestLogger.info(
+                {
+                    user_id,
+                    requesterUserId: session.user.id,
+                    page,
+                    limit,
+                    total,
+                    totalPages,
+                    returnedCount: historyLoans.length,
+                    orphanLoansDeleted,
+                    durationMs: Date.now() - startedAt,
+                },
+                'loans.history.success',
+            );
+
+            return {
+                ok: true,
+                user_id,
+                loans: historyLoans,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages,
+                },
+            };
+        } catch (error) {
+            set.status = 500;
+            requestLogger.error(
+                {
+                    user_id,
+                    requesterUserId: session.user.id,
+                    durationMs: Date.now() - startedAt,
+                    error: toErrorDetails(error),
+                },
+                'loans.history.error',
+            );
+            return {
+                ok: false,
+                message: 'Failed to fetch loan history due to an unexpected error.',
+            };
+        }
+    }, {
+        params: z.object({
+            user_id: z.string(),
+        }),
+        query: z.object({
+            page: z.coerce.number().optional(),
+            limit: z.coerce.number().optional(),
+        }),
+        response: z.union([
+            PaginatedLoanHistorySchema,
             LoanAccessDeniedSchema,
         ]),
     })
